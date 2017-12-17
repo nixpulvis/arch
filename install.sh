@@ -99,8 +99,9 @@ sed -e "s/XXXX/${partuuid}/" arch.conf > mnt/boot/loader/entries/arch.conf
 # TODO: Here is as good a place as any to install all the packages.
 # - `intel-ucode`
 # - `fish`
-# - ...
-pacstrap mnt base intel-ucode
+# - `vim` # TODO: additional args for clipboard?
+# ...
+pacstrap mnt base intel-ucode dosfstools arch-install-scripts vim
 
 # Configure fstab for the new install to correctly mount filesystems on boot.
 genfstab -U mnt >> mnt/etc/fstab
