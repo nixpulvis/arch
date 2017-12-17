@@ -1,6 +1,19 @@
-# My Arch Linux
+# Arch Linux
 
-To facilitate both a sane live image and installed setup, this repoitory
-provides `live/` and `install/`. Live creates a unchanging (between restarts)
-image that is ideal for USB or CD media, and can be used to install or recover
-machines with. Install targets a device and sets up my Arch environmnt.
+TODO: Quick explaination of Arch, and why we use it.
+
+## Install
+
+Running the installer script will repurpose the target device to be a working
+Arch Linux installation.
+
+TODO: Dual-boot.
+TODO: Read only installs.
+TODO: ISO creation.
+
+```sh
+./install.sh <device>
+
+# Example:
+./install.sh /dev/sda
+```
