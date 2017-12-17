@@ -10,6 +10,7 @@ Arch Linux installation.
 TODO: Dual-boot.
 TODO: Read only installs.
 TODO: ISO creation.
+TODO: Allow pacman mirror from disk (for offline installs).
 
 ```sh
 ./install.sh <device>
