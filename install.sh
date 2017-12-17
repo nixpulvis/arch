@@ -37,6 +37,8 @@ if [ -z "$target" ]; then
     usage 1
 fi
 
+# TODO: Check for network.
+
 # Confirm the target.
 echo "Bootstrapping $target, this will format the device."
 
@@ -71,6 +73,8 @@ p
 w
 EOF
 
+# TODO: We need to reload the device partition information in the OS.
+
 # Setup the filesystems.
 mkfs.vfat -F32 ${target}1
 mkfs.ext4 -F ${target}2
@@ -91,21 +95,21 @@ cp loader.conf mnt/boot/loader/loader.conf
 partuuid=`find -L /dev/disk/by-partuuid -samefile ${target}2 | xargs basename`
 sed -e "s/XXXX/${partuuid}/" arch.conf > mnt/boot/loader/entries/arch.conf
 
-exit 1
-
 # Install Arch (requires network connection).
 # TODO: Here is as good a place as any to install all the packages.
 # - `intel-ucode`
 # - `fish`
 # - ...
-pacstrap mnt base
+pacstrap mnt base intel-ucode
 
 # Configure fstab for the new install to correctly mount filesystems on boot.
 genfstab -U mnt >> mnt/etc/fstab
 
 # chroot into the new installation.
-arch-chroot mnt
+cat << EOF | arch-chroot mnt
 
+hostname
+ls -la
 # TODO: NTP Date/time
 # TODO: HW clock
 # TODO: Locale
@@ -115,8 +119,7 @@ arch-chroot mnt
 # TODO: Create nixpulvis user (fish shell)
 # TODO: Install dotfiles
 
-# Leave the chroot environmnt.
-exit
+EOF
 
 # Clean up the local mountpoints.
 umount mnt/boot
