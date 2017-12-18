@@ -1,0 +1,5 @@
+base
+intel-ucode
+dosfstools
+arch-install-scripts
+vim
