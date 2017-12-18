@@ -86,6 +86,11 @@ EOF
 }
 
 install() {
+    mkdir -p mnt
+    mount ${target}2 mnt
+    mkdir -p mnt/boot
+    mount ${target}1 mnt/boot
+
     # TODO: Check for network.
     # TODO: Check host locale settings.
 
@@ -94,45 +99,39 @@ install() {
     
     # Configure fstab for the new install to correctly mount filesystems on boot.
     genfstab -U mnt >> mnt/etc/fstab
-    
-    # TODO: Configure rootfs, and copy it over to the installed root on device.
-    # This should be done in a more generic way.
 
     # Configure the bootloader entry.
-    mkdir -p mnt/boot/loader/entries
-    cp rootfs/boot/loader/loader.conf mnt/boot/loader/loader.conf
+    mkdir -p mnt/loader/entries
+    cp rootfs/boot/loader/loader.conf mnt/loader/loader.conf
     partuuid=`find -L /dev/disk/by-partuuid -samefile ${target}2 | xargs basename`
-    sed -e "s/XXXX/${partuuid}/" rootfs/boot/loader/entries/arch.conf > mnt/boot/loader/entries/arch.conf
+    sed -e "s/XXXX/${partuuid}/" rootfs/boot/loader/entries/arch.conf > mnt/loader/entries/arch.conf
+
+    umount mnt/boot
+    umount mnt
+    rm -r mnt
 }
 
 configure() {
+    mkdir -p mnt
+    mount ${target}2 mnt
+    mkdir -p mnt/boot
+    mount ${target}1 mnt/boot
+
     arch-chroot mnt << EOF
 bootctl --no-variables --path=/boot install
 EOF
-#    # # Install systemd-boot to the ESP.
-#    # bootctl --no-variables --path=mnt/boot install
-#    # 
-#    # # Setup the locale.
-#    # sed -ie "s/#en_US\.UTF/en_US.UTF/" /etc/locale.gen 
-#    # locale-gen
-#    # locale
-#    # 
-#    # # Setup the timezone for correct local system time.
-#    # timedatectl set-timezone America/Denver
-#    # 
-#    # # Set the system clock to use NTP.
-#    # timedatectl set-ntp true
-#    # 
-#    # # Set the hardware clock based on the system clock, however the HW clock
-#    # # will be set in UTC.
-#    # timedatectl set-local-rtc 0
-#    # hwclock --systohc
-#    # 
-#    # # TODO: Password
-#    # # TODO: Hostname
-#    # # TODO: Root shell -> fish
-#    # # TODO: Create nixpulvis user (fish shell)
-#    # # TODO: Install dotfiles
+
+    umount mnt/boot
+
+    cp -rp rootfs/* mnt
+    ln -sf mnt/usr/lib/systemd/system/install.service mnt/etc/systemd/system/getty.target.wants/install.service
+    
+    # FIXME: Seems to run, but doesn't exit correctly. Leaves a running systemd-nspawn process.
+    sleep 1
+    systemd-nspawn -bD mnt
+
+    umount mnt
+    rm -r mnt
 }
 
 # Check the arguments.
@@ -142,15 +141,6 @@ fi
 
 # Do the work!
 bootstrap
-
-mkdir -p mnt
-mount ${target}2 mnt
-mkdir -p mnt/boot
-mount ${target}1 mnt/boot
-
 install
 configure
 
-umount mnt/boot
-umount mnt
-rm -r mnt
