@@ -130,6 +130,12 @@ configure() {
     rm -r mnt
 }
 
+# Check for root user.
+if [[ $EUID -ne 0 ]]; then
+    echo "Run this script as root."
+    exit 1
+fi
+
 # Check the arguments.
 if [ -z "$target" ]; then
     usage 1
