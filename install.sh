@@ -36,20 +36,20 @@ confirm() {
 bootstrap() {
     # Confirm the target.
     echo "Bootstrapping $target, this will format the device."
-    
+
     # Warn users about erase time.
     if [ -n "$erase" ]; then
         echo "Erasing $target with $erase, this can take a while."
     fi
-    
+
     # Display some information about the target device.
-    lsblk $target 
-    
+    lsblk $target
+
     confirm
     echo
 
     # From this point on we don't ask the user for anything.
-    
+
     # Remove all mounts of the target device.
     umount $target?* 2>/dev/null || true
 
@@ -59,7 +59,7 @@ bootstrap() {
 
     echo $target
 
-    # Format the device. 
+    # Format the device.
     # NOTE: Try to get the OS to ignore the old partitions.
     partx -u $target
     fdisk $target << EOF
@@ -77,11 +77,11 @@ n
 p
 w
 EOF
-    
+
     # Setup the filesystems.
     mkfs.vfat -F32 ${target}1
     mkfs.ext4 -F ${target}2
-    
+
     # TODO: One day we'll encrypt, maybe.
 }
 
@@ -121,11 +121,11 @@ configure() {
 bootctl --no-variables --path=/boot install
 EOF
 
-    umount mnt/boot
-
     cp -rp rootfs/* mnt
     ln -sf mnt/usr/lib/systemd/system/install.service mnt/etc/systemd/system/getty.target.wants/install.service
-    
+
+    umount mnt/boot
+
     # FIXME: Seems to run, but doesn't exit correctly. Leaves a running systemd-nspawn process.
     sleep 1
     systemd-nspawn -bD mnt
