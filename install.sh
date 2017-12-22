@@ -95,7 +95,7 @@ install() {
     # TODO: Check host locale settings.
 
     # Install Arch (requires network connection).
-    cat packages.txt | xargs pacstrap mnt
+    pacstrap mnt base intel-ucode
 
     # Configure fstab for the new install to correctly mount filesystems on boot.
     genfstab -U mnt >> mnt/etc/fstab

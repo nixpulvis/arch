@@ -37,6 +37,12 @@ pacman -S --noconfirm git
 # We develop.
 pacman -S --noconfirm base-devel
 
+# Vim is the *current* editor of choice. We need `gvim` for X11 clipboard
+# support.
+pacman -S --no-confirm gvim
+
+# TODO: Install dosfstools and these arch installer scripts.
+
 # TODO: Hostname
 # TODO: Passwords
 
