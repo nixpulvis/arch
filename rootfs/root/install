@@ -1,27 +1,44 @@
 #!/bin/bash
+
+# Setup the locale.
+sed -ie "s/#en_US\.UTF/en_US.UTF/" /etc/locale.gen
+locale-gen
+echo "LANG=en_US.UTF-8" > /etc/locale.conf
+
+# Setup the timezone for correct local system time.
+timedatectl set-timezone America/Denver
+
+# Set the system clock to use NTP.
 timedatectl set-ntp true
 
-#    # # Install systemd-boot to the ESP.
-#    # bootctl --no-variables --path=mnt/boot install
-#    # 
-#    # # Setup the locale.
-#    # sed -ie "s/#en_US\.UTF/en_US.UTF/" /etc/locale.gen 
-#    # locale-gen
-#    # locale
-#    # 
-#    # # Setup the timezone for correct local system time.
-#    # timedatectl set-timezone America/Denver
-#    # 
-#    # # Set the system clock to use NTP.
-#    # timedatectl set-ntp true
-#    # 
-#    # # Set the hardware clock based on the system clock, however the HW clock
-#    # # will be set in UTC.
-#    # timedatectl set-local-rtc 0
-#    # hwclock --systohc
-#    # 
-#    # # TODO: Password
-#    # # TODO: Hostname
-#    # # TODO: Root shell -> fish
-#    # # TODO: Create nixpulvis user (fish shell)
-#    # # TODO: Install dotfiles
+# TODO: Create a post-install unit that prompts users to check these settings.
+# We don't want to touch the host machine's clocks.
+#
+# # Set the hardware clock based on the system clock, however the HW clock
+# # will be set in UTC.
+# timedatectl set-local-rtc 0
+# hwclock --systohc
+
+# TODO: /etc/sudoers
+pacman -S --noconfirm sudo
+chmod 440 /etc/sudoers
+chown root:root /etc/sudoers
+
+# Install our favorite shell, to be used by all.
+pacman -S --noconfirm fish
+chsh -s /usr/bin/fish
+
+# Create our user account, with password-less sudo.
+useradd -m -G wheel -s /usr/bin/fish nixpulvis
+
+# Install git, it's the best thing since sliced bread.
+pacman -S --noconfirm git
+
+# We develop.
+pacman -S --noconfirm base-devel
+
+# TODO: Hostname
+# TODO: Passwords
+
+sudo -iu nixpulvis /root/install_nixpulvis
+

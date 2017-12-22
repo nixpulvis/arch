@@ -5,6 +5,7 @@ rm -r /etc/systemd/system/console-getty.service.d
 rm /etc/systemd/system/getty.target.wants/install.service
 rm /usr/lib/systemd/system/install.service
 rm /root/install
+rm /root/install_nixpulvis
 rm /root/cleanup
 
 # Poweroff to kill the systemd-nspawn command.

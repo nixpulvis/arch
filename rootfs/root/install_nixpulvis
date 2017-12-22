@@ -1,0 +1,25 @@
+#!/bin/bash
+
+if [ "$(whoami)" != "nixpulvis" ]; then
+    echo "Must be run as nixpulvis."
+    exit 1
+fi
+
+# Install Yaourt for AUR package installation.
+git clone https://aur.archlinux.org/package-query.git
+cd package-query
+makepkg -si --noconfirm
+cd ..
+git clone https://aur.archlinux.org/yaourt.git
+cd yaourt
+makepkg -si --noconfirm
+cd ..
+rm -r package-query yaourt
+
+# Install nixpulvis's dotfiles.
+cd $HOME
+git init
+git remote add origin https://github.com/nixpulvis/dotfiles.git
+git fetch
+git checkout master
+
