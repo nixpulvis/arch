@@ -26,12 +26,18 @@ git checkout master
 # TODO: Install rbenv/Ruby/Rails.
 
 # Install our fun quote generator.
-sudo pacman -S --noconfirm fortune
+sudo pacman -S --noconfirm fortune-mod
 
 # Install the Xorg server.
 sudo pacman -S --noconfirm xorg xorg-xinit
 
-# Install i3 WM.
+# Install i3 WM, and supporting tools.
 # TODO: We might need to fork this to fix a border issue.
-sudo pacman -S --noconfirm i3
+sudo pacman -S --noconfirm i3 dmenu rofi
+
+# Install Mozilla's great fonts.
+sudo pacman -S --noconfirm ttf-fira-mono ttf-fira-sans
+
+# Install our terminal emulator.
+yaourt -S --noconfirm alacritty-git
 
