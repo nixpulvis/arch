@@ -24,10 +24,13 @@ timedatectl set-ntp true
 # timedatectl set-local-rtc 0
 # hwclock --systohc
 
-# TODO: /etc/sudoers
+# Setup sudo.
 pacman -S --noconfirm sudo
 chmod 440 /etc/sudoers
 chown root:root /etc/sudoers
+
+# Install dialog for wifi-menu.
+pacman -S --noconfirm dialog
 
 # Install our favorite shell, to be used by all.
 pacman -S --noconfirm fish
