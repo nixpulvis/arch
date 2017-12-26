@@ -14,7 +14,7 @@ git clone https://aur.archlinux.org/yaourt.git
 cd yaourt
 makepkg -si --noconfirm
 cd ..
-rm -r package-query yaourt
+rm -rf package-query yaourt
 
 # Install nixpulvis's dotfiles.
 cd $HOME
@@ -23,7 +23,7 @@ git remote add origin https://github.com/nixpulvis/dotfiles.git
 git fetch
 git checkout master
 
-# TODO: Install rbenv/Ruby/Rails.
+# TODO: Install Ruby/Rails.
 git clone https://github.com/rbenv/rbenv.git ~/.rbenv
 mkdir ~/.rbenv/plugins
 git clone https://github.com/rbenv/ruby-build.git ~/.rbenv/plugins/ruby-build
@@ -35,6 +35,9 @@ sudo pacman -S --noconfirm rustup
 rustup toolchain install stable
 rustup default stable
 cargo install cargo-script
+
+# Install hub the GitHub wrapper.
+sudo pacman -S --noconfirm hub
 
 # Install our fun quote generator.
 sudo pacman -S --noconfirm fortune-mod
