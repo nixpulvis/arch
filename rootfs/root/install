@@ -29,8 +29,8 @@ pacman -S --noconfirm sudo
 chmod 440 /etc/sudoers
 chown root:root /etc/sudoers
 
-# Install dialog for wifi-menu.
-pacman -S --noconfirm dialog
+# Install dialog and wpa_supplicant for wifi-menu.
+pacman -S --noconfirm dialog wpa_supplicant
 
 # Install our favorite shell, to be used by all.
 pacman -S --noconfirm fish

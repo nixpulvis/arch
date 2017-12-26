@@ -39,6 +39,12 @@ cargo install cargo-script
 # Install hub the GitHub wrapper.
 sudo pacman -S --noconfirm hub
 
+# Install stable rust.
+sudo pacman -S --noconfirm rustup
+rustup toolchain install stable
+rustup default stable
+cargo install cargo-script
+
 # Install our fun quote generator.
 sudo pacman -S --noconfirm fortune-mod
 
