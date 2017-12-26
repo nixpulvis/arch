@@ -46,10 +46,12 @@ pacman -S --noconfirm base-devel
 # support.
 pacman -S --noconfirm gvim
 
-# TODO: Install dosfstools and these arch installer scripts.
+# TODO #1: Install these arch installer scripts.
+pacman -S --noconfirm dosfstools
 
 # TODO: Hostname
-# TODO: Passwords
+# TODO #3: Passwords
 
+# TODO: Figure out a better way to call this script.
 sudo -iu nixpulvis /root/install_nixpulvis
 

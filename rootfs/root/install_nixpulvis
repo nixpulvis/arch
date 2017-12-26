@@ -24,6 +24,9 @@ git fetch
 git checkout master
 
 # TODO: Install rbenv/Ruby/Rails.
+git clone https://github.com/rbenv/rbenv.git ~/.rbenv
+mkdir ~/.rbenv/plugins
+git clone https://github.com/rbenv/ruby-build.git ~/.rbenv/plugins/ruby-build
 
 # Install our fun quote generator.
 sudo pacman -S --noconfirm fortune-mod
@@ -37,6 +40,9 @@ sudo pacman -S --noconfirm i3 dmenu rofi
 
 # Install Mozilla's great fonts.
 sudo pacman -S --noconfirm ttf-fira-mono ttf-fira-sans
+
+# Install fallback terminal.
+pacman -S --noconfirm termite
 
 # Install our terminal emulator.
 yaourt -S --noconfirm alacritty-git
