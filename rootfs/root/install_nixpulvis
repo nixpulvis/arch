@@ -23,7 +23,7 @@ git remote add origin https://github.com/nixpulvis/dotfiles.git
 git fetch
 git checkout master
 
-# TODO: Install Ruby/Rails.
+# TODO: Install Rails.
 git clone https://github.com/rbenv/rbenv.git ~/.rbenv
 mkdir ~/.rbenv/plugins
 git clone https://github.com/rbenv/ruby-build.git ~/.rbenv/plugins/ruby-build
@@ -39,12 +39,6 @@ cargo install cargo-script
 # Install hub the GitHub wrapper.
 sudo pacman -S --noconfirm hub
 
-# Install stable rust.
-sudo pacman -S --noconfirm rustup
-rustup toolchain install stable
-rustup default stable
-cargo install cargo-script
-
 # Install our fun quote generator.
 sudo pacman -S --noconfirm fortune-mod
 
@@ -57,6 +51,10 @@ sudo pacman -S --noconfirm i3 dmenu rofi feh
 
 # Install Mozilla's great fonts.
 sudo pacman -S --noconfirm ttf-fira-mono ttf-fira-sans
+
+# Install firefox.
+# TODO: Configure a custom firefox theme.
+sudo pacman -S --noconfirm firefox
 
 # Install fallback terminal.
 pacman -S --noconfirm termite
