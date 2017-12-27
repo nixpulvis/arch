@@ -42,6 +42,10 @@ useradd -m -G wheel -s /usr/bin/fish nixpulvis
 # Install git, it's the best thing since sliced bread.
 pacman -S --noconfirm git
 
+# Install this repository into root's Code directory.
+mkdir ~/Code
+git clone https://github.com/nixpulvis/arch.git ~/Code/arch
+
 # We develop.
 pacman -S --noconfirm base-devel
 
