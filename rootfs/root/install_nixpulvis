@@ -48,6 +48,8 @@ sudo pacman -S --noconfirm xorg xorg-xinit
 # Install i3 WM, and supporting tools.
 # TODO: We might need to fork this to fix a border issue.
 sudo pacman -S --noconfirm i3 dmenu rofi feh
+sudo pacman -R --noconfirm i3lock
+yaourt -S --noconfirm i3lock-color
 
 # Install Mozilla's great fonts.
 sudo pacman -S --noconfirm ttf-fira-mono ttf-fira-sans
@@ -55,6 +57,12 @@ sudo pacman -S --noconfirm ttf-fira-mono ttf-fira-sans
 # Install firefox.
 # TODO: Configure a custom firefox theme.
 sudo pacman -S --noconfirm firefox
+
+# Install the swiss-army-knife of media players.
+sudo pacman -S --noconfirm vlc
+
+# Install the Torrent program of choice.
+sudo pacman -S --noconfirm transmission-cli
 
 # Install fallback terminal.
 pacman -S --noconfirm termite
