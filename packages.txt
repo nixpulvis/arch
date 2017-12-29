@@ -1,4 +1,0 @@
-base
-intel-ucode
-dosfstools
-vim
