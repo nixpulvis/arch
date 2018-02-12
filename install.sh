@@ -95,13 +95,14 @@ install() {
     # TODO: Check host locale settings.
 
     # Install Arch (requires network connection).
-    pacstrap mnt base intel-ucode
+    cat packages.txt | xargs pacstrap mnt base
 
     # Configure fstab for the new install to correctly mount filesystems on boot.
     genfstab -U mnt >> mnt/etc/fstab
 
     arch-chroot mnt << EOF
 bootctl --no-variables --path=/boot install
+chsh -s /usr/bin/fish
 EOF
 
     # Configure the bootloader entry.
@@ -111,21 +112,6 @@ EOF
     sed -e "s/XXXX/${partuuid}/" rootfs/boot/loader/entries/arch.conf > mnt/boot/loader/entries/arch.conf
 
     umount mnt/boot
-    umount mnt
-    rm -r mnt
-}
-
-configure() {
-    mkdir -p mnt
-    mount ${target}2 mnt
-
-    cp -rp rootfs/* mnt
-    ln -sf mnt/usr/lib/systemd/system/install.service mnt/etc/systemd/system/getty.target.wants/install.service
-
-    # FIXME: Seems to run, but doesn't exit correctly. Leaves a running systemd-nspawn process.
-    sleep 1  # XXX: This doesn't seem to help...
-    systemd-nspawn -bD mnt
-
     umount mnt
     rm -r mnt
 }
@@ -144,5 +130,4 @@ fi
 # Do the work!
 bootstrap
 install
-configure
 

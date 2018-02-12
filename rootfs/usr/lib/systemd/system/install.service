@@ -1,7 +1,0 @@
-[Unit]
-Wants=init.scope
-
-[Service]
-Type=oneshot
-ExecStart=/root/install
-ExecStartPost=/root/cleanup
