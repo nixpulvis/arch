@@ -1,5 +1,4 @@
 #!/bin/bash
-
 set -e
 
 # Parse the command line arguments.
@@ -53,6 +52,7 @@ bootstrap() {
     # Remove all mounts of the target device.
     umount $target?* 2>/dev/null || true
 
+    # TODO: Mount a plain crypt and wipe with that.
     if [ -n "$erase" ]; then
         dd if=$erase of=$target status=progress
     fi
@@ -78,16 +78,22 @@ p
 w
 EOF
 
+    # Setup disk encryption for root partition.
+    luks=`cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 8 | head -n 1`
+    cryptsetup luksFormat ${target}2
+    cryptsetup luksOpen ${target}2 $luks
+    pvcreate /dev/mapper/$luks
+    vgcreate vg0 /dev/mapper/$luks
+    lvcreate -l +100%FREE vg0 --name root
+
     # Setup the filesystems.
     mkfs.vfat -F32 ${target}1
-    mkfs.ext4 -F ${target}2
-
-    # TODO: One day we'll encrypt, maybe.
+    mkfs.ext4 /dev/mapper/vg0-root
 }
 
 install() {
     mkdir -p mnt
-    mount ${target}2 mnt
+    mount /dev/mapper/vg0-root mnt
     mkdir -p mnt/boot
     mount ${target}1 mnt/boot
 
@@ -100,7 +106,10 @@ install() {
     # Configure fstab for the new install to correctly mount filesystems on boot.
     genfstab -U mnt >> mnt/etc/fstab
 
+    cp rootfs/etc/mkinitcpio.conf mnt/etc/mkinitcpio.conf
+
     arch-chroot mnt << EOF
+mkinitcpio -p linux
 bootctl --no-variables --path=/boot install
 chsh -s /usr/bin/fish
 EOF
