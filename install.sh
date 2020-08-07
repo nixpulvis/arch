@@ -77,23 +77,17 @@ n
 p
 w
 EOF
-
-    # Setup disk encryption for root partition.
-    luks=`cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 8 | head -n 1`
     cryptsetup luksFormat ${target}2
-    cryptsetup luksOpen ${target}2 $luks
-    pvcreate /dev/mapper/$luks
-    vgcreate vg0 /dev/mapper/$luks
-    lvcreate -l +100%FREE vg0 --name root
+    cryptsetup luksOpen ${target}2 cryptroot
 
     # Setup the filesystems.
     mkfs.vfat -F32 ${target}1
-    mkfs.ext4 /dev/mapper/vg0-root
+    mkfs.ext4 /dev/mapper/cryptroot
 }
 
 install() {
     mkdir -p mnt
-    mount /dev/mapper/vg0-root mnt
+    mount /dev/mapper/cryptroot mnt
     mkdir -p mnt/boot
     mount ${target}1 mnt/boot
 
