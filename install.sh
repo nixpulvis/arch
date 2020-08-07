@@ -103,6 +103,7 @@ install() {
     cp rootfs/etc/mkinitcpio.conf mnt/etc/mkinitcpio.conf
 
     arch-chroot mnt << EOF
+pacman -S --noconfirm linux
 mkinitcpio -p linux
 bootctl --no-variables --path=/boot install
 chsh -s /usr/bin/fish
