@@ -3,6 +3,8 @@ fish
 dialog
 wpa_supplicant
 bind-tools
+alsa-lib
+alsa-plugins
 alsa-utils
 pulseaudio
 git
