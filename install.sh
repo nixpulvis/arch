@@ -107,6 +107,7 @@ pacman -S --noconfirm linux
 mkinitcpio -p linux
 bootctl --no-variables --path=/boot install
 chsh -s /usr/bin/fish
+passwd -d root
 EOF
 
     # Configure the bootloader entry.
