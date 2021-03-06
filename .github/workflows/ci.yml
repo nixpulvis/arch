@@ -19,7 +19,17 @@ jobs:
         run: sudo apt-get install qemu
 
       - name: Setup arch environment
-        run: echo "TODO"
+        run: |
+          git clone https://github.com/tokland/arch-bootstrap.git
+          sudo install -m 755 arch-bootstrap/arch-bootstrap.sh /usr/local/bin/arch-bootstrap
+          sudo arch-bootstrap arch-env
+          sudo mount --bind /proc    arch-env/proc
+          sudo mount --bind /sys     arch-env/sys
+          sudo mount --bind /dev     arch-env/dev
+          sudo mount --bind /dev/pts arch-env/dev/pts
+          sudo chroot arch-env
+
+
       - name: Build ISO
         run: echo "TODO"
       - name: Test ISO
