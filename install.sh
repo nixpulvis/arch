@@ -116,6 +116,9 @@ EOF
     partuuid=`find -L /dev/disk/by-partuuid -samefile ${target}2 | xargs basename`
     sed -e "s/XXXX/${partuuid}/" rootfs/boot/loader/entries/arch.conf > mnt/boot/loader/entries/arch.conf
 
+    # Set the DNS server.
+    cp rootfs/etc/resolv.conf /mnt/etc/resolv.conf
+
     umount mnt/boot
     umount mnt
     rm -r mnt
