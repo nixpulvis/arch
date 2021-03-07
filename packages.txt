@@ -2,6 +2,7 @@ alsa-lib
 alsa-plugins
 alsa-utils
 arch-install-scripts
+base
 base-devel
 bind-tools
 dhcpcd
@@ -11,6 +12,7 @@ fish
 git
 gvim
 intel-ucode
+linux
 linux-firmware
 netctl
 posix
