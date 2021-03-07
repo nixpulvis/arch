@@ -1,9 +1,16 @@
 #!/bin/bash
 set -e
 
+usage() {
+    echo $verbose
+    echo "TODO"
+    exit $1
+}
+
 # Parse the command line arguments.
-while getopts 'e:h' arg; do
+while getopts 've:h' arg; do
     case "${arg}" in
+        v) verbose=1 ;;
         e) erase="${OPTARG}" ;;
         h) usage 0 ;;
         *)
@@ -14,11 +21,6 @@ while getopts 'e:h' arg; do
 done
 shift $((OPTIND -1))
 target=$1
-
-usage() {
-    echo "TODO"
-    exit $1
-}
 
 confirm() {
     read -p "Are you sure? [Y/n] " answer
