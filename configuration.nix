@@ -3,7 +3,12 @@
   imports = [
     <home-manager/nixos>
     ./hardware-configuration.nix
+
+    ./root.nix
+    ./nixpulvis.nix
   ];
+
+  # TODO: Factor out the pukak spesific configs.
 
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
@@ -66,26 +71,6 @@
 
   home-manager.useGlobalPkgs = true;
   home-manager.useUserPackages = true;
-
-  users.users.root = {
-    isNormalUser = false;
-  };
-
-  home-manager.users.root = {
-    programs.vim = {
-      enable = true;
-      plugins = with pkgs.vimPlugins; [vim-nix];
-    };
-  };
-
-  users.users.nixpulvis = {
-    isNormalUser = true;
-    extraGroups = ["wheel"];
-  };
-
-  # TODO: Use from submodule and link after activation.
-  # home-manager.users.nixpulvis = import ./home.nix;
-
 
   # This value determines the NixOS release from which the default
   # settings for stateful data, like file locations and database versions
