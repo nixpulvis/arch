@@ -15,10 +15,15 @@
 
   time.timeZone = "America/New_York";
 
+  environment.pathsToLink = [ "/libexec" ];
+
   # TODO: Define your hostname from hardware imports.
-  networking.hostName = "pukak";
-  networking.interfaces.enp7s0.useDHCP = true;
+  networking.hostName = "masva";
   networking.nameservers = ["1.1.1.1"];
+  networking.networkmanager.enable = true;
+  services.avahi.enable = true;
+
+  programs.sway.enable = true;
 
   sound.enable = true;
   hardware.pulseaudio.enable = true;
@@ -38,21 +43,6 @@
   #   font = "Lat2-Terminus16";
   #   keyMap = "us";
   # };
-
-  # TODO: Wayland support then remove this eventually.
-  services.xserver = {
-    enable = true;
-    libinput.enable = true;
-    layout = "us";
-    # xkbOptions = "";  # TODO: map caps to esc.
-    displayManager.session = [
-      {
-        manage = "desktop";
-        name = "xsession";
-        start = ''exec $HOME/.xsession'';
-      }
-    ];
-  };
 
   services.openssh.enable = true;
   services.printing.enable = true;
