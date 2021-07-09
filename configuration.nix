@@ -23,6 +23,9 @@
   networking.networkmanager.enable = true;
   services.avahi.enable = true;
 
+  services.xserver.enable = true;
+  services.xserver.displayManager.sddm.enable = true;
+
   programs.sway.enable = true;
 
   sound.enable = true;
