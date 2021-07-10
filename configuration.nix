@@ -23,8 +23,17 @@
   networking.networkmanager.enable = true;
   services.avahi.enable = true;
 
-  services.xserver.enable = true;
-  services.xserver.displayManager.sddm.enable = true;
+  services.xserver = {
+    enable = true;
+    layout = "us";
+    libinput.enable = true;
+    xkbOptions = "ctrl:nocaps";
+    displayManager.sddm.enable = true;
+    displayManager.defaultSession = "none+i3";
+    windowManager.i3.enable = true;
+    # desktopManager.wallpaper.mode = "fill";
+    # desktopManager.wallpaper.combineScreens = true;
+  };
 
   programs.sway.enable = true;
 
@@ -53,13 +62,20 @@
 
   environment.systemPackages = with pkgs; [
     home-manager
+    yubico-pam
   ];
 
   programs.mtr.enable = true;
+  programs.ssh.startAgent = false;
   programs.gnupg.agent = {
     enable = true;
-    pinentryFlavor = "curses";
+    pinentryFlavor = "gtk2";
     enableSSHSupport = true;
+  };
+
+  security.pam.yubico = {
+    enable = true;
+    mode = "challenge-response";
   };
 
   home-manager.useGlobalPkgs = true;
