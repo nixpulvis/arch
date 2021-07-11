@@ -2,32 +2,34 @@
 {
   imports = [
     <home-manager/nixos>
-    ./hardware-configuration.nix
 
     ./audio.nix
     ./boot.nix
     ./crypto.nix
     ./gui.nix
     ./network.nix
-    ./yubi.nix
 
-    ./root.nix
-    ./nixpulvis.nix
+    ./users/root.nix
+    ./users/nixpulvis.nix
+
+    ./hardware/masva.nix
   ];
 
-  # TODO: Factor out the pukak spesific configs.
-
   time.timeZone = "America/New_York";
-  environment.pathsToLink = [ "/libexec" ];
+
+  crypto = {
+    enable = true;
+    yubikey = true;
+  };
+
+  gui = {
+    enable = true;
+    sway = true;
+  };
+
   services.printing.enable = true;
   programs.mtr.enable = true;
-
-  # Select internationalisation properties.
-  # i18n.defaultLocale = "en_US.UTF-8";
-  # console = {
-  #   font = "Lat2-Terminus16";
-  #   keyMap = "us";
-  # };
+  environment.pathsToLink = [ "/libexec" ];
 
   environment.systemPackages = with pkgs; [
     home-manager
