@@ -1,7 +1,11 @@
 { config, pkgs, ... }:
-{
+let home-manager = builtins.fetchGit {
+  url = "https://github.com/nix-community/home-manager";
+  ref = "master";
+};
+in {
   imports = [
-    <home-manager/nixos>
+    (import "${home-manager}/nixos")
 
     ./audio.nix
     ./boot.nix
