@@ -43,8 +43,13 @@ in {
       services.xserver = {
         enable = true;
         layout = "us";
-        libinput.enable = true;
         xkbOptions = "ctrl:nocaps";
+        libinput = {
+          enable = true;
+          touchpad.clickMethod = "none";
+          touchpad.tapping = false;
+          touchpad.disableWhileTyping = true;
+        };
       };
     })
 
