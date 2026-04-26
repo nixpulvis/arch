@@ -9,6 +9,7 @@
 #
 #   - packages.x86_64 is merged with our packages.txt
 #   - AUR packages (downgrade, paru-bin) are built and added as a local repo
+#   - packages.txt packages are cached into a offline repo for offline installs
 #   - install.sh, packages.txt, and rootfs/ are copied into /root
 #   - profiledef.sh is patched with our ISO metadata
 #   - The default shell is set to fish
@@ -33,16 +34,16 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # Setup a temp dir for the build profile. Cleaned up on exit.
-WORK=$(mktemp -d)
+WORK=$(mktemp -d --tmpdir="$SCRIPT_DIR")
 OUT="${SCRIPT_DIR}/out"
 trap "rm -rf $WORK" EXIT
 
 echo "Building ISO in $WORK ..."
 
-# 1. Copy the releng profile as our base.
+# Copy the releng profile as our base.
 cp -r "$RELENG"/* "$WORK"/
 
-# 2. Merge our packages into the live image's package list.
+# Merge our packages into the live image's package list.
 #    Filter comments and blank lines from packages.txt, append any
 #    that aren't already present.
 while IFS= read -r pkg; do
@@ -52,10 +53,10 @@ while IFS= read -r pkg; do
     fi
 done < "$SCRIPT_DIR/packages.txt"
 
-# 3. Build AUR packages and create a local repo.
+# Build AUR packages and create a local repo.
 AUR_PACKAGES=(downgrade paru-bin)
-LOCAL_REPO="$WORK/local-repo"
-mkdir -p "$LOCAL_REPO"
+AUR_REPO="$WORK/aur-repo"
+mkdir -p "$AUR_REPO"
 
 BUILDDIR=$(sudo -u "$SUDO_USER" mktemp -d)
 for pkg in "${AUR_PACKAGES[@]}"; do
@@ -64,37 +65,53 @@ for pkg in "${AUR_PACKAGES[@]}"; do
     sudo -u "$SUDO_USER" git clone "https://aur.archlinux.org/$pkg.git"
     cd "$pkg"
     sudo -u "$SUDO_USER" makepkg -s --noconfirm
-    cp *.pkg.tar.zst "$LOCAL_REPO/"
+    cp *.pkg.tar.zst "$AUR_REPO/"
     echo "$pkg" >> "$WORK/packages.x86_64"
 done
 rm -rf "$BUILDDIR"
 cd "$SCRIPT_DIR"
 
 # Create the repo database.
-repo-add "$LOCAL_REPO/custom.db.tar.gz" "$LOCAL_REPO"/*.pkg.tar.zst
+repo-add "$AUR_REPO/custom.db.tar.gz" "$AUR_REPO"/*.pkg.tar.zst
 
-# Add the local repo to pacman.conf.
+# Add the AUR repo to pacman.conf.
 cat >> "$WORK/pacman.conf" << EOF
 
 [custom]
 SigLevel = Optional TrustAll
-Server = file://$LOCAL_REPO
+Server = file://$AUR_REPO
 EOF
 
-# 4. Copy the installer into /root on the live filesystem.
+# Download packages.txt packages into a offline repo for offline installs.
+OFFLINE_REPO="$WORK/airootfs/root/offline-repo"
+DOWNLOAD_CACHE=$(mktemp -d)
+chmod 777 "$DOWNLOAD_CACHE"
+FAKE_DB=$(mktemp -d)
+chmod 777 "$FAKE_DB"
+mkdir -p "$FAKE_DB/local"
+cat "$SCRIPT_DIR/packages.txt" | xargs pacman -Syw --noconfirm --cachedir "$DOWNLOAD_CACHE" --dbpath "$FAKE_DB"
+rm -rf "$FAKE_DB"
+mkdir -p "$OFFLINE_REPO"
+mv "$DOWNLOAD_CACHE"/*.pkg.tar.zst "$OFFLINE_REPO/"
+rm -rf "$DOWNLOAD_CACHE"
+cp "$AUR_REPO"/*.pkg.tar.zst "$OFFLINE_REPO/"
+repo-add "$OFFLINE_REPO/offline.db.tar.gz" "$OFFLINE_REPO"/*.pkg.tar.zst
+
+# Copy the installer into /root on the live filesystem.
 cp "$SCRIPT_DIR/install.sh" "$WORK/airootfs/root/"
 cp "$SCRIPT_DIR/packages.txt" "$WORK/airootfs/root/"
 cp -r "$SCRIPT_DIR/rootfs" "$WORK/airootfs/root/"
 
-# 5. Patch profiledef.sh with our ISO metadata.
+# Patch profiledef.sh with our ISO metadata.
 sed -i 's/^iso_name=.*/iso_name="archlinux-nixpulvis"/' "$WORK/profiledef.sh"
 sed -i 's/^iso_publisher=.*/iso_publisher="nixpulvis"/' "$WORK/profiledef.sh"
 sed -i 's/^iso_application=.*/iso_application="Arch Linux Live\/Install"/' "$WORK/profiledef.sh"
+sed -i "s/airootfs_image_tool_options=.*/airootfs_image_tool_options=('-comp' 'zstd' '-Xcompression-level' '15')/" "$WORK/profiledef.sh"
 
-# 6. Set the default shell to fish on the live image.
+# Set the default shell to fish on the live image.
 sed -i 's|root:/usr/bin/zsh|root:/usr/bin/fish|' "$WORK/airootfs/etc/passwd"
 
-# 7. Set the MOTD.
+# Set the MOTD (overwrite releng's motd in the profile's airootfs).
 ARCH_VERSION=$(pacman -Q linux | awk '{print $2}')
 BUILD_DATE=$(date +%Y-%m-%d)
 cat > "$WORK/airootfs/etc/motd" << EOF

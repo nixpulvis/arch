@@ -49,6 +49,42 @@ dd if=out/archlinux-nixpulvis-*.iso of=/dev/sdX bs=4M status=progress
 Test in QEMU:
 
 ```sh
-pacman -S qemu-system-x86 qemu-ui-gtk
-qemu-system-x86_64 -cdrom out/archlinux-nixpulvis-*.iso -m 2G -enable-kvm -boot d -display gtk
+pacman -S qemu-system-x86 qemu-ui-gtk qemu-img
+```
+
+Boot the installer ISO:
+
+```sh
+qemu-system-x86_64 \
+  -cdrom out/archlinux-nixpulvis-*.iso \
+  -boot d \
+  -m 2G \
+  -enable-kvm \
+  -display gtk
+```
+
+Test the installer against a virtual disk:
+
+```sh
+qemu-img create -f qcow2 test-disk.qcow2 20G
+qemu-system-x86_64 \
+  -cdrom out/archlinux-nixpulvis-*.iso \
+  -boot d \
+  -m 2G \
+  -enable-kvm \
+  -display gtk \
+  -drive file=test-disk.qcow2,format=qcow2
+```
+
+Test offline install (no network):
+
+```sh
+qemu-system-x86_64 \
+  -cdrom out/archlinux-nixpulvis-*.iso \
+  -boot d \
+  -m 2G \
+  -enable-kvm \
+  -display gtk \
+  -drive file=test-disk.qcow2,format=qcow2 \
+  -nic none
 ```
