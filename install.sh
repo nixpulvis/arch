@@ -4,8 +4,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 usage() {
-    echo $verbose
-    echo "TODO"
+    echo "Usage: install.sh [-e <source>] <device>"
+    echo
+    echo "Install Arch Linux to a target device with LUKS encryption."
+    echo
+    echo "  -e <source>  Erase the device first (e.g. -e /dev/urandom)"
+    echo "  -h           Show this help"
     exit $1
 }
 
@@ -30,8 +34,7 @@ partition_name() {
 }
 
 # Parse the command line arguments.
-while getopts 've:h' arg; do case "${arg}" in
-        v) verbose=true ;;
+while getopts 'e:h' arg; do case "${arg}" in
         e) erase="${OPTARG}" ;;
         h) usage 0 ;;
         *)
@@ -82,8 +85,8 @@ bootstrap() {
         dd if=$erase of=$target status=progress
     fi
 
-    # Try to get the OS to ignore the old partitions.
-    partx -u $target 2>/dev/null || true
+    # Clear old partition signatures so fdisk starts clean.
+    wipefs -a $target
 
     # Format the target with a GPT, 512MB EFI partition #1 and the rest
     # for the root filesystem.
@@ -152,6 +155,7 @@ CONF
     arch-chroot mnt << EOF
 mkinitcpio -p linux
 bootctl --no-variables --path=/boot install
+systemctl enable dhcpcd
 chsh -s /usr/bin/fish
 passwd -d root
 EOF
@@ -164,6 +168,14 @@ EOF
 
     # Set the DNS server.
     cp rootfs/etc/resolv.conf mnt/etc/resolv.conf
+
+    echo "Syncing to disk..."
+    while grep -q '^Dirty:\s*[1-9]' /proc/meminfo; do
+        dirty=$(awk '/^Dirty:/ {print $2, $3}' /proc/meminfo)
+        printf "\r  %s remaining..." "$dirty"
+        sleep 1
+    done
+    printf "\r  done.%20s\n" ""
 
     umount mnt/boot
     umount mnt

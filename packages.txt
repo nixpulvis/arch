@@ -4,6 +4,7 @@ alsa-plugins
 alsa-utils
 arch-install-scripts
 arch-wiki-docs
+archiso
 base
 base-devel
 bc
@@ -49,6 +50,7 @@ rsync
 smartmontools
 sshfs
 strace
+sudo
 sysstat
 tcpdump
 testdisk
