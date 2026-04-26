@@ -76,7 +76,7 @@ bootstrap() {
     # From this point on we don't ask the user for anything.
 
     # Remove all mounts of the target device.
-    if umount $target?* 2>| grep -q 'target is busy'; then
+    if umount $target?* 2>&1 | grep -q 'target is busy'; then
         error "could not unmount $target"
     fi
 
@@ -115,10 +115,10 @@ EOF
 
 # Installs an updated Arch to the formatted target
 install() {
-    mkdir -p mnt
-    mount /dev/mapper/cryptroot mnt
-    mkdir -p mnt/boot
-    mount $boot mnt/boot
+    MNT=$(mktemp -d)
+    mount /dev/mapper/cryptroot "$MNT"
+    mkdir -p "$MNT/boot"
+    mount $boot "$MNT/boot"
 
     # TODO: Check host locale settings.
 
@@ -128,7 +128,7 @@ install() {
     OFFLINE_REPO="$SCRIPT_DIR/offline-repo"
     if curl -s --head --max-time 5 https://archlinux.org > /dev/null 2>&1; then
         echo "Network available, installing from remote repos."
-        cat packages.txt | xargs pacstrap mnt
+        cat "$SCRIPT_DIR/packages.txt" | xargs pacstrap "$MNT"
     elif [ -d "$OFFLINE_REPO" ]; then
         echo "No network, installing from offline repo."
         PACMAN_CONF=$(mktemp)
@@ -141,18 +141,18 @@ Architecture = auto
 SigLevel = Optional TrustAll
 Server = file://$OFFLINE_REPO
 CONF
-        cat packages.txt | xargs pacstrap -C "$PACMAN_CONF" mnt
+        cat "$SCRIPT_DIR/packages.txt" | xargs pacstrap -C "$PACMAN_CONF" "$MNT"
         rm "$PACMAN_CONF"
     else
         error "no network and no offline repo available."
     fi
 
     # Configure fstab for the new install to correctly mount filesystems on boot.
-    genfstab -U mnt >> mnt/etc/fstab
+    genfstab -U "$MNT" >> "$MNT/etc/fstab"
 
-    cp rootfs/etc/mkinitcpio.conf mnt/etc/mkinitcpio.conf
+    cp "$SCRIPT_DIR/rootfs/etc/mkinitcpio.conf" "$MNT/etc/mkinitcpio.conf"
 
-    arch-chroot mnt << EOF
+    arch-chroot "$MNT" << EOF
 mkinitcpio -p linux
 bootctl --no-variables --path=/boot install
 systemctl enable dhcpcd
@@ -161,13 +161,13 @@ passwd -d root
 EOF
 
     # Configure the bootloader entry.
-    mkdir -p mnt/boot/loader/entries
-    cp rootfs/boot/loader/loader.conf mnt/boot/loader/loader.conf
+    mkdir -p "$MNT/boot/loader/entries"
+    cp "$SCRIPT_DIR/rootfs/boot/loader/loader.conf" "$MNT/boot/loader/loader.conf"
     partuuid=`find -L /dev/disk/by-partuuid -samefile $root | xargs basename`
-    sed -e "s/XXXX/${partuuid}/" rootfs/boot/loader/entries/arch.conf > mnt/boot/loader/entries/arch.conf
+    sed -e "s/XXXX/${partuuid}/" "$SCRIPT_DIR/rootfs/boot/loader/entries/arch.conf" > "$MNT/boot/loader/entries/arch.conf"
 
     # Set the DNS server.
-    cp rootfs/etc/resolv.conf mnt/etc/resolv.conf
+    cp "$SCRIPT_DIR/rootfs/etc/resolv.conf" "$MNT/etc/resolv.conf"
 
     echo "Syncing to disk..."
     while grep -q '^Dirty:\s*[1-9]' /proc/meminfo; do
@@ -177,9 +177,9 @@ EOF
     done
     printf "\r  done.%20s\n" ""
 
-    umount mnt/boot
-    umount mnt
-    rm -r mnt
+    umount "$MNT/boot"
+    umount "$MNT"
+    rmdir "$MNT"
 }
 
 

@@ -52,7 +52,12 @@ fi
 # Setup a temp dir for the build profile. Cleaned up on exit.
 WORK=$(mktemp -d --tmpdir="$SCRIPT_DIR")
 OUT="${SCRIPT_DIR}/out"
-trap "rm -rf $WORK" EXIT
+CLEANUP_USER=""
+cleanup() {
+    [ -n "$CLEANUP_USER" ] && userdel -r "$CLEANUP_USER"
+    rm -rf "$WORK"
+}
+trap cleanup EXIT
 
 echo "Building ISO in $WORK ..."
 
@@ -81,7 +86,7 @@ if curl -s --head --max-time 5 https://aur.archlinux.org > /dev/null 2>&1; then
     if [ -z "$BUILD_USER" ]; then
         BUILD_USER="builduser"
         useradd -m "$BUILD_USER"
-        trap "userdel -r $BUILD_USER; rm -rf $WORK" EXIT
+        CLEANUP_USER="$BUILD_USER"
     fi
 
     BUILDDIR=$(sudo -u "$BUILD_USER" mktemp -d)
@@ -142,6 +147,9 @@ sed -i "s/^iso_version=.*/iso_version=\"$BUILD_DATE\"/" "$WORK/profiledef.sh"
 sed -i 's/^iso_publisher=.*/iso_publisher="nixpulvis"/' "$WORK/profiledef.sh"
 sed -i 's/^iso_application=.*/iso_application="Arch Linux Live\/Install"/' "$WORK/profiledef.sh"
 sed -i "s/airootfs_image_tool_options=.*/airootfs_image_tool_options=('-comp' 'zstd' '-Xcompression-level' '15')/" "$WORK/profiledef.sh"
+
+# Register our scripts in archiso's file_permissions table.
+sed -i 's|^file_permissions=(|file_permissions=(\n  ["/root/install.sh"]="0:0:755"\n  ["/root/build.sh"]="0:0:755"|' "$WORK/profiledef.sh"
 
 # Set the default shell to bash on the live image (releng defaults to zsh).
 sed -i 's|root:/usr/bin/zsh|root:/bin/bash|' "$WORK/airootfs/etc/passwd"
