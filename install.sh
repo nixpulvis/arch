@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 usage() {
     echo $verbose
     echo "TODO"
@@ -81,7 +83,7 @@ bootstrap() {
     fi
 
     # Try to get the OS to ignore the old partitions.
-    partx -u $target
+    partx -u $target 2>/dev/null || true
 
     # Format the target with a GPT, 512MB EFI partition #1 and the rest
     # for the root filesystem.
@@ -115,11 +117,32 @@ install() {
     mkdir -p mnt/boot
     mount $boot mnt/boot
 
-    # TODO: Check for network.
     # TODO: Check host locale settings.
 
-    # Install Arch (requires network connection).
-    cat packages.txt | xargs pacstrap mnt
+    # If an offline repo exists (built into the ISO), add it as a fallback
+    # so pacstrap can work offline. Remote packages are preferred when
+    # the network is available.
+    OFFLINE_REPO="$SCRIPT_DIR/offline-repo"
+    if curl -s --head --max-time 5 https://archlinux.org > /dev/null 2>&1; then
+        echo "Network available, installing from remote repos."
+        cat packages.txt | xargs pacstrap mnt
+    elif [ -d "$OFFLINE_REPO" ]; then
+        echo "No network, installing from offline repo."
+        PACMAN_CONF=$(mktemp)
+        cat > "$PACMAN_CONF" << CONF
+[options]
+HoldPkg = pacman glibc
+Architecture = auto
+
+[offline]
+SigLevel = Optional TrustAll
+Server = file://$OFFLINE_REPO
+CONF
+        cat packages.txt | xargs pacstrap -C "$PACMAN_CONF" mnt
+        rm "$PACMAN_CONF"
+    else
+        error "no network and no offline repo available."
+    fi
 
     # Configure fstab for the new install to correctly mount filesystems on boot.
     genfstab -U mnt >> mnt/etc/fstab
