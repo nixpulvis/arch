@@ -22,7 +22,6 @@ Arch Linux installation.
 
 TODO: Dual-boot.
 TODO: Read only installs.
-TODO: ISO creation.
 TODO: Allow pacman mirror from disk (for offline installs).
 
 ```sh
@@ -30,4 +29,26 @@ TODO: Allow pacman mirror from disk (for offline installs).
 
 # Example:
 ./install.sh /dev/sda
+```
+
+## ISO
+
+Build a bootable ISO with the installer baked in. Requires `archiso`.
+
+```sh
+pacman -S archiso
+sudo ./build.sh
+```
+
+Write to a USB drive:
+
+```sh
+dd if=out/archlinux-nixpulvis-*.iso of=/dev/sdX bs=4M status=progress
+```
+
+Test in QEMU:
+
+```sh
+pacman -S qemu-system-x86 qemu-ui-gtk
+qemu-system-x86_64 -cdrom out/archlinux-nixpulvis-*.iso -m 2G -enable-kvm -boot d -display gtk
 ```
