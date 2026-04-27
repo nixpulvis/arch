@@ -81,6 +81,10 @@ bootstrap() {
     fi
 
     # TODO: Mount a plain crypt and wipe with that.
+    # When the drive's firmware is trusted, prefer hardware secure-erase
+    # over a software wipe: `blkdiscard $target` for SATA SSDs (TRIM),
+    # `nvme format --ses=1 $target` for NVMe, or `hdparm --security-erase`
+    # for ATA drives that support it.
     if [ -n "$erase" ]; then
         dd if="$erase" of="$target" status=progress
     fi
