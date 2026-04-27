@@ -23,12 +23,12 @@ git
 gvim
 htop
 inetutils
-intel-ucode
 iotop
 iw
 linux
 linux-firmware
 lm_sensors
+lsof
 lsof
 man-db
 man-pages
@@ -52,6 +52,7 @@ sshfs
 strace
 sudo
 sysstat
+systemd-ukify
 tcpdump
 testdisk
 tmux
