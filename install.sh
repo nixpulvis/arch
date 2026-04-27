@@ -10,7 +10,7 @@ usage() {
     echo
     echo "  -e <source>  Erase the device first (e.g. -e /dev/urandom)"
     echo "  -h           Show this help"
-    exit $1
+    exit "$1"
 }
 
 error() {
@@ -26,7 +26,7 @@ ending_digit() {
 }
 
 partition_name() {
-    if ending_digit $1; then
+    if ending_digit "$1"; then
         echo "$1p$2"
     else
         echo "$1$2"
@@ -45,11 +45,11 @@ while getopts 'e:h' arg; do case "${arg}" in
 done
 shift $((OPTIND -1))
 target=$1
-boot=$(partition_name $target 1)
-root=$(partition_name $target 2)
+boot=$(partition_name "$target" 1)
+root=$(partition_name "$target" 2)
 
 confirm() {
-    read -p "Are you sure? [Y/n] " answer
+    read -rp "Are you sure? [Y/n] " answer
     case "$answer" in
         [yY][eE][sS]|[yY])
 	    ;;
@@ -69,28 +69,28 @@ bootstrap() {
         echo "Erasing $target with $erase, this can take a while."
     fi
 
-    lsblk $target
+    lsblk "$target"
     confirm
     echo
 
     # From this point on we don't ask the user for anything.
 
     # Remove all mounts of the target device.
-    if umount $target?* 2>| grep -q 'target is busy'; then
+    if umount "$target"?* 2>&1 | grep -q 'target is busy'; then
         error "could not unmount $target"
     fi
 
     # TODO: Mount a plain crypt and wipe with that.
     if [ -n "$erase" ]; then
-        dd if=$erase of=$target status=progress
+        dd if="$erase" of="$target" status=progress
     fi
 
     # Clear old partition signatures so fdisk starts clean.
-    wipefs -a $target
+    wipefs -a "$target"
 
     # Format the target with a GPT, 512MB EFI partition #1 and the rest
     # for the root filesystem.
-    fdisk $target << EOF
+    fdisk "$target" << EOF
 g
 n
 
@@ -105,20 +105,20 @@ n
 p
 w
 EOF
-    cryptsetup luksFormat $root
-    cryptsetup luksOpen $root cryptroot
+    cryptsetup luksFormat "$root"
+    cryptsetup luksOpen "$root" cryptroot
 
     # Setup the filesystems.
-    mkfs.vfat -F32 $boot
+    mkfs.vfat -F32 "$boot"
     mkfs.ext4 /dev/mapper/cryptroot
 }
 
 # Installs an updated Arch to the formatted target
 install() {
-    mkdir -p mnt
-    mount /dev/mapper/cryptroot mnt
-    mkdir -p mnt/boot
-    mount $boot mnt/boot
+    MNT=$(mktemp -d)
+    mount /dev/mapper/cryptroot "$MNT"
+    mkdir -p "$MNT/boot"
+    mount "$boot" "$MNT/boot"
 
     # TODO: Check host locale settings.
 
@@ -128,7 +128,7 @@ install() {
     OFFLINE_REPO="$SCRIPT_DIR/offline-repo"
     if curl -s --head --max-time 5 https://archlinux.org > /dev/null 2>&1; then
         echo "Network available, installing from remote repos."
-        cat packages.txt | xargs pacstrap mnt
+        xargs pacstrap "$MNT" < "$SCRIPT_DIR/packages.txt"
     elif [ -d "$OFFLINE_REPO" ]; then
         echo "No network, installing from offline repo."
         PACMAN_CONF=$(mktemp)
@@ -141,18 +141,18 @@ Architecture = auto
 SigLevel = Optional TrustAll
 Server = file://$OFFLINE_REPO
 CONF
-        cat packages.txt | xargs pacstrap -C "$PACMAN_CONF" mnt
+        xargs pacstrap -C "$PACMAN_CONF" "$MNT" < "$SCRIPT_DIR/packages.txt"
         rm "$PACMAN_CONF"
     else
         error "no network and no offline repo available."
     fi
 
     # Configure fstab for the new install to correctly mount filesystems on boot.
-    genfstab -U mnt >> mnt/etc/fstab
+    genfstab -U "$MNT" >> "$MNT/etc/fstab"
 
-    cp rootfs/etc/mkinitcpio.conf mnt/etc/mkinitcpio.conf
+    cp "$SCRIPT_DIR/rootfs/etc/mkinitcpio.conf" "$MNT/etc/mkinitcpio.conf"
 
-    arch-chroot mnt << EOF
+    arch-chroot "$MNT" << EOF
 mkinitcpio -p linux
 bootctl --no-variables --path=/boot install
 systemctl enable dhcpcd
@@ -161,13 +161,13 @@ passwd -d root
 EOF
 
     # Configure the bootloader entry.
-    mkdir -p mnt/boot/loader/entries
-    cp rootfs/boot/loader/loader.conf mnt/boot/loader/loader.conf
-    partuuid=`find -L /dev/disk/by-partuuid -samefile $root | xargs basename`
-    sed -e "s/XXXX/${partuuid}/" rootfs/boot/loader/entries/arch.conf > mnt/boot/loader/entries/arch.conf
+    mkdir -p "$MNT/boot/loader/entries"
+    cp "$SCRIPT_DIR/rootfs/boot/loader/loader.conf" "$MNT/boot/loader/loader.conf"
+    partuuid=$(find -L /dev/disk/by-partuuid -samefile "$root" -print0 | xargs -0 basename)
+    sed -e "s/XXXX/${partuuid}/" "$SCRIPT_DIR/rootfs/boot/loader/entries/arch.conf" > "$MNT/boot/loader/entries/arch.conf"
 
     # Set the DNS server.
-    cp rootfs/etc/resolv.conf mnt/etc/resolv.conf
+    cp "$SCRIPT_DIR/rootfs/etc/resolv.conf" "$MNT/etc/resolv.conf"
 
     echo "Syncing to disk..."
     while grep -q '^Dirty:\s*[1-9]' /proc/meminfo; do
@@ -177,9 +177,9 @@ EOF
     done
     printf "\r  done.%20s\n" ""
 
-    umount mnt/boot
-    umount mnt
-    rm -r mnt
+    umount "$MNT/boot"
+    umount "$MNT"
+    rmdir "$MNT"
 }
 
 

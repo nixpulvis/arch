@@ -39,6 +39,7 @@ while getopts 'so:h' arg; do case "${arg}" in
            echo "  -o <path>  Path to existing offline repo (default: \$SCRIPT_DIR/offline-repo)"
            echo "  -h         Show this help"
            exit 0 ;;
+        *) exit 1 ;;
     esac
 done
 offline_repo_path="${offline_repo_path:-$SCRIPT_DIR/offline-repo}"
@@ -52,7 +53,12 @@ fi
 # Setup a temp dir for the build profile. Cleaned up on exit.
 WORK=$(mktemp -d --tmpdir="$SCRIPT_DIR")
 OUT="${SCRIPT_DIR}/out"
-trap "rm -rf $WORK" EXIT
+CLEANUP_USER=""
+cleanup() {
+    [ -n "$CLEANUP_USER" ] && userdel -r "$CLEANUP_USER"
+    rm -rf "$WORK"
+}
+trap cleanup EXIT
 
 echo "Building ISO in $WORK ..."
 
@@ -81,7 +87,7 @@ if curl -s --head --max-time 5 https://aur.archlinux.org > /dev/null 2>&1; then
     if [ -z "$BUILD_USER" ]; then
         BUILD_USER="builduser"
         useradd -m "$BUILD_USER"
-        trap "userdel -r $BUILD_USER; rm -rf $WORK" EXIT
+        CLEANUP_USER="$BUILD_USER"
     fi
 
     BUILDDIR=$(sudo -u "$BUILD_USER" mktemp -d)
@@ -91,7 +97,7 @@ if curl -s --head --max-time 5 https://aur.archlinux.org > /dev/null 2>&1; then
         sudo -u "$BUILD_USER" git clone "https://aur.archlinux.org/$pkg.git"
         cd "$pkg"
         sudo -u "$BUILD_USER" makepkg -s --noconfirm
-        cp *.pkg.tar.zst "$AUR_REPO/"
+        cp ./*.pkg.tar.zst "$AUR_REPO/"
         echo "$pkg" >> "$WORK/packages.x86_64"
     done
     rm -rf "$BUILDDIR"
@@ -103,7 +109,7 @@ if curl -s --head --max-time 5 https://aur.archlinux.org > /dev/null 2>&1; then
     FAKE_DB=$(mktemp -d)
     chmod 777 "$FAKE_DB"
     mkdir -p "$FAKE_DB/local"
-    cat "$SCRIPT_DIR/packages.txt" | xargs pacman -Syw --noconfirm --cachedir "$DOWNLOAD_CACHE" --dbpath "$FAKE_DB"
+    xargs pacman -Syw --noconfirm --cachedir "$DOWNLOAD_CACHE" --dbpath "$FAKE_DB" < "$SCRIPT_DIR/packages.txt"
     rm -rf "$FAKE_DB"
     mv "$DOWNLOAD_CACHE"/*.pkg.tar.zst "$OFFLINE_REPO/"
     rm -rf "$DOWNLOAD_CACHE"
@@ -112,7 +118,7 @@ else
     echo "No network, copying existing offline repo."
     cp "$offline_repo_path"/*.pkg.tar.zst "$OFFLINE_REPO/"
     for pkg in "${AUR_PACKAGES[@]}"; do
-        cp "$offline_repo_path"/$pkg-*.pkg.tar.zst "$AUR_REPO/"
+        cp "$offline_repo_path"/"$pkg"-*.pkg.tar.zst "$AUR_REPO/"
         echo "$pkg" >> "$WORK/packages.x86_64"
     done
 fi
@@ -142,6 +148,9 @@ sed -i "s/^iso_version=.*/iso_version=\"$BUILD_DATE\"/" "$WORK/profiledef.sh"
 sed -i 's/^iso_publisher=.*/iso_publisher="nixpulvis"/' "$WORK/profiledef.sh"
 sed -i 's/^iso_application=.*/iso_application="Arch Linux Live\/Install"/' "$WORK/profiledef.sh"
 sed -i "s/airootfs_image_tool_options=.*/airootfs_image_tool_options=('-comp' 'zstd' '-Xcompression-level' '15')/" "$WORK/profiledef.sh"
+
+# Register our scripts in archiso's file_permissions table.
+sed -i 's|^file_permissions=(|file_permissions=(\n  ["/root/install.sh"]="0:0:755"\n  ["/root/build.sh"]="0:0:755"|' "$WORK/profiledef.sh"
 
 # Set the default shell to bash on the live image (releng defaults to zsh).
 sed -i 's|root:/usr/bin/zsh|root:/bin/bash|' "$WORK/airootfs/etc/passwd"
