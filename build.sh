@@ -56,6 +56,7 @@ OUT="${SCRIPT_DIR}/out"
 CLEANUP_USER=""
 cleanup() {
     [ -n "$CLEANUP_USER" ] && userdel -r "$CLEANUP_USER"
+    [ -n "${ALL_PACKAGES:-}" ] && rm -f "$ALL_PACKAGES"
     rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -65,15 +66,20 @@ echo "Building ISO in $WORK ..."
 # Copy the releng profile as our base.
 cp -r "$RELENG"/* "$WORK"/
 
-# Merge our packages into the live image's package list.
-#    Filter comments and blank lines from packages.txt, append any
-#    that aren't already present.
+# Single source of truth for everything we want in both the live image and
+# the offline repo: packages.txt plus microcode for both vendors (the live
+# ISO needs to boot arbitrary hardware; install.sh picks the matching one
+# for the on-disk install).
+ALL_PACKAGES=$(mktemp)
+{ cat "$SCRIPT_DIR/packages.txt"; printf '%s\n' intel-ucode amd-ucode; } > "$ALL_PACKAGES"
+
+# Merge into the live image's package list, skipping comments/blanks/dupes.
 while IFS= read -r pkg; do
     [[ -z "$pkg" || "$pkg" = \#* ]] && continue
     if ! grep -qx "$pkg" "$WORK/packages.x86_64"; then
         echo "$pkg" >> "$WORK/packages.x86_64"
     fi
-done < "$SCRIPT_DIR/packages.txt"
+done < "$ALL_PACKAGES"
 
 # Build AUR packages and populate the offline repo.
 AUR_PACKAGES=(downgrade paru-bin)
@@ -103,13 +109,13 @@ if curl -s --head --max-time 5 https://aur.archlinux.org > /dev/null 2>&1; then
     rm -rf "$BUILDDIR"
     cd "$SCRIPT_DIR"
 
-    # Download packages.txt packages into the offline repo.
+    # Download every package from the merged list into the offline repo.
     DOWNLOAD_CACHE=$(mktemp -d)
     chmod 777 "$DOWNLOAD_CACHE"
     FAKE_DB=$(mktemp -d)
     chmod 777 "$FAKE_DB"
     mkdir -p "$FAKE_DB/local"
-    xargs pacman -Syw --noconfirm --cachedir "$DOWNLOAD_CACHE" --dbpath "$FAKE_DB" < "$SCRIPT_DIR/packages.txt"
+    xargs pacman -Syw --noconfirm --cachedir "$DOWNLOAD_CACHE" --dbpath "$FAKE_DB" < "$ALL_PACKAGES"
     rm -rf "$FAKE_DB"
     mv "$DOWNLOAD_CACHE"/*.pkg.tar.zst "$OFFLINE_REPO/"
     rm -rf "$DOWNLOAD_CACHE"

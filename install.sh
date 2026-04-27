@@ -4,11 +4,17 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 usage() {
-    echo "Usage: install.sh [-e <source>] <device>"
+    echo "Usage: install.sh [-e <source>] [-b <esp>] [-n <name>] <device>"
     echo
     echo "Install Arch Linux to a target device with LUKS encryption."
     echo
     echo "  -e <source>  Erase the device first (e.g. -e /dev/urandom)"
+    echo "  -b <esp>     Reuse an existing ESP partition (dual-boot). <device>"
+    echo "               is treated as the root partition; no GPT changes are"
+    echo "               made and the existing loader config is preserved."
+    echo "  -n <name>    Name for this install (default: arch). Used as"
+    echo "               \$ESP/EFI/Linux/<name>.efi for the UKI, and as"
+    echo "               'Arch Linux (<name>)' for the systemd-boot menu entry."
     echo "  -h           Show this help"
     exit "$1"
 }
@@ -33,9 +39,21 @@ partition_name() {
     fi
 }
 
+# Pick the microcode package matching the host CPU. Empty for VMs/exotic.
+ucode_package() {
+    case "$(awk -F: '/vendor_id/ {gsub(/ /,"",$2); print $2; exit}' /proc/cpuinfo)" in
+        GenuineIntel) echo intel-ucode ;;
+        AuthenticAMD) echo amd-ucode ;;
+    esac
+}
+
+name="arch"
+
 # Parse the command line arguments.
-while getopts 'e:h' arg; do case "${arg}" in
+while getopts 'e:b:n:h' arg; do case "${arg}" in
         e) erase="${OPTARG}" ;;
+        b) dual_boot_esp="${OPTARG}" ;;
+        n) name="${OPTARG}" ;;
         h) usage 0 ;;
         *)
            echo "Invalid argument '${arg}'"
@@ -45,8 +63,16 @@ while getopts 'e:h' arg; do case "${arg}" in
 done
 shift $((OPTIND -1))
 target=$1
-boot=$(partition_name "$target" 1)
-root=$(partition_name "$target" 2)
+
+if [ -n "$dual_boot_esp" ]; then
+    # Dual-boot mode: caller supplies a pre-partitioned root device and
+    # an existing ESP. We don't touch the GPT.
+    boot=$dual_boot_esp
+    root=$target
+else
+    boot=$(partition_name "$target" 1)
+    root=$(partition_name "$target" 2)
+fi
 
 confirm() {
     read -rp "Are you sure? [Y/n] " answer
@@ -64,7 +90,11 @@ confirm() {
 # This function can optionally wipe the old data by simply writing over it
 # all.
 bootstrap() {
-    echo "Bootstrapping $target, this will format the device."
+    if [ -n "$dual_boot_esp" ]; then
+        echo "Bootstrapping $target as the root partition; reusing ESP $boot."
+    else
+        echo "Bootstrapping $target, this will format the device."
+    fi
     if [ -n "$erase" ]; then
         echo "Erasing $target with $erase, this can take a while."
     fi
@@ -92,9 +122,10 @@ bootstrap() {
     # Clear old partition signatures so fdisk starts clean.
     wipefs -a "$target"
 
-    # Format the target with a GPT, 512MB EFI partition #1 and the rest
-    # for the root filesystem.
-    fdisk "$target" << EOF
+    if [ -z "$dual_boot_esp" ]; then
+        # Format the target with a GPT, 512MB EFI partition #1 and the rest
+        # for the root filesystem.
+        fdisk "$target" << EOF
 g
 n
 
@@ -109,11 +140,15 @@ n
 p
 w
 EOF
+        # Force the kernel to re-read the partition table and wait for udev
+        # to create the new partition device nodes before we format them.
+        partprobe "$target"
+        udevadm settle
+        mkfs.vfat -F32 "$boot"
+    fi
+
     cryptsetup luksFormat "$root"
     cryptsetup luksOpen "$root" cryptroot
-
-    # Setup the filesystems.
-    mkfs.vfat -F32 "$boot"
     mkfs.ext4 /dev/mapper/cryptroot
 }
 
@@ -121,10 +156,23 @@ EOF
 install() {
     MNT=$(mktemp -d)
     mount /dev/mapper/cryptroot "$MNT"
-    mkdir -p "$MNT/boot"
-    mount "$boot" "$MNT/boot"
+    mkdir -p "$MNT/efi"
+    mount "$boot" "$MNT/efi"
+
+    # Seed vconsole.conf before pacstrap so the linux package's post-install
+    # hook (which runs mkinitcpio with the keymap hook) doesn't error.
+    mkdir -p "$MNT/etc"
+    cp "$SCRIPT_DIR/rootfs/etc/vconsole.conf" "$MNT/etc/vconsole.conf"
 
     # TODO: Check host locale settings.
+
+    # Build the package list with the matching microcode appended.
+    ucode=$(ucode_package)
+    PACSTRAP_PACKAGES=$(mktemp)
+    cp "$SCRIPT_DIR/packages.txt" "$PACSTRAP_PACKAGES"
+    if [ -n "$ucode" ]; then
+        echo "$ucode" >> "$PACSTRAP_PACKAGES"
+    fi
 
     # If an offline repo exists (built into the ISO), add it as a fallback
     # so pacstrap can work offline. Remote packages are preferred when
@@ -132,7 +180,7 @@ install() {
     OFFLINE_REPO="$SCRIPT_DIR/offline-repo"
     if curl -s --head --max-time 5 https://archlinux.org > /dev/null 2>&1; then
         echo "Network available, installing from remote repos."
-        xargs pacstrap "$MNT" < "$SCRIPT_DIR/packages.txt"
+        xargs pacstrap "$MNT" < "$PACSTRAP_PACKAGES"
     elif [ -d "$OFFLINE_REPO" ]; then
         echo "No network, installing from offline repo."
         PACMAN_CONF=$(mktemp)
@@ -145,30 +193,68 @@ Architecture = auto
 SigLevel = Optional TrustAll
 Server = file://$OFFLINE_REPO
 CONF
-        xargs pacstrap -C "$PACMAN_CONF" "$MNT" < "$SCRIPT_DIR/packages.txt"
+        xargs pacstrap -C "$PACMAN_CONF" "$MNT" < "$PACSTRAP_PACKAGES"
         rm "$PACMAN_CONF"
     else
         error "no network and no offline repo available."
     fi
+    rm "$PACSTRAP_PACKAGES"
 
     # Configure fstab for the new install to correctly mount filesystems on boot.
     genfstab -U "$MNT" >> "$MNT/etc/fstab"
 
+    # Stage initramfs / UKI inputs before mkinitcpio runs.
     cp "$SCRIPT_DIR/rootfs/etc/mkinitcpio.conf" "$MNT/etc/mkinitcpio.conf"
+    # LUKS header UUID rather than partition PARTUUID: works for both
+    # partition-LUKS and whole-disk-LUKS targets; cryptsetup stamps it
+    # at format time so it's always available now.
+    luks_uuid=$(blkid -s UUID -o value "$root")
+    if [ -z "$luks_uuid" ]; then
+        error "blkid found no UUID on $root after LUKS format. Aborting before generating a UKI with a broken kernel cmdline."
+    fi
+    sed -e "s/XXXX/${luks_uuid}/" \
+        "$SCRIPT_DIR/rootfs/etc/kernel/cmdline" > "$MNT/etc/kernel/cmdline"
+    sed -e "s/UKINAME/${name}/g" \
+        "$SCRIPT_DIR/rootfs/etc/mkinitcpio.d/linux.preset" \
+        > "$MNT/etc/mkinitcpio.d/linux.preset"
+
+    # Per-install os-release for the UKI's .osrel section so this
+    # install's entry is identifiable in systemd-boot's menu rather
+    # than blending in with every other "Arch Linux" UKI on the ESP.
+    sed -e "s/^PRETTY_NAME=.*/PRETTY_NAME=\"Arch Linux (${name})\"/" \
+        "$MNT/etc/os-release" > "$MNT/etc/uki-os-release"
+
+    # mkinitcpio -U needs the UKI's parent dir to exist beforehand.
+    mkdir -p "$MNT/efi/EFI/Linux"
+
+    # On a fresh ESP, install systemd-boot. On a shared ESP, only update
+    # an already-installed copy (and leave it alone if newer than ours).
+    if [ -f "$MNT/efi/EFI/systemd/systemd-bootx64.efi" ]; then
+        bootctl_action="update"
+    else
+        bootctl_action="install"
+    fi
 
     arch-chroot "$MNT" << EOF
-mkinitcpio -p linux
-bootctl --no-variables --path=/boot install
+set -e
+mkinitcpio -P
+bootctl --esp-path=/efi $bootctl_action
 systemctl enable dhcpcd
 chsh -s /usr/bin/fish
 passwd -d root
 EOF
 
-    # Configure the bootloader entry.
-    mkdir -p "$MNT/boot/loader/entries"
-    cp "$SCRIPT_DIR/rootfs/boot/loader/loader.conf" "$MNT/boot/loader/loader.conf"
-    partuuid=$(find -L /dev/disk/by-partuuid -samefile "$root" -print0 | xargs -0 basename)
-    sed -e "s/XXXX/${partuuid}/" "$SCRIPT_DIR/rootfs/boot/loader/entries/arch.conf" > "$MNT/boot/loader/entries/arch.conf"
+    # Write loader.conf whenever we freshly installed systemd-boot —
+    # bootctl install's default has no `timeout`, which means auto-boot
+    # the first entry with no menu. That breaks discoverability for
+    # both single-OS installs (no recovery path) and dual-boot. If
+    # systemd-boot was already there ($bootctl_action = update), the
+    # existing config was set by whoever installed first; leave it.
+    if [ "$bootctl_action" = "install" ]; then
+        sed -e "s/UKINAME/${name}/g" \
+            "$SCRIPT_DIR/rootfs/boot/loader/loader.conf" \
+            > "$MNT/efi/loader/loader.conf"
+    fi
 
     # Set the DNS server.
     cp "$SCRIPT_DIR/rootfs/etc/resolv.conf" "$MNT/etc/resolv.conf"
@@ -181,7 +267,7 @@ EOF
     done
     printf "\r  done.%20s\n" ""
 
-    umount "$MNT/boot"
+    umount "$MNT/efi"
     umount "$MNT"
     rmdir "$MNT"
 }

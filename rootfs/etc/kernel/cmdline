@@ -1,0 +1,1 @@
+cryptdevice=UUID=XXXX:cryptroot root=/dev/mapper/cryptroot rw quiet
