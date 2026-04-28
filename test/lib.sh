@@ -35,6 +35,7 @@ find_ovmf() {
         /usr/share/edk2/x64/OVMF.4m.fd \
         /usr/share/edk2-ovmf/x64/OVMF.4m.fd \
         /usr/share/edk2-ovmf/x64/OVMF.fd \
+        /usr/share/OVMF/OVMF_CODE_4M.fd \
         /usr/share/OVMF/OVMF_CODE.fd; do
         if [ -f "$p" ]; then
             OVMF_BIOS=$p
