@@ -13,9 +13,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: shellcheck
-        run: shellcheck build.sh install.sh
+        run: shellcheck build.sh install.sh test/*.sh
 
-  build:
+  build-iso:
     runs-on: ubuntu-latest
     container:
       image: archlinux:latest
@@ -43,69 +43,74 @@ jobs:
           path: out/*.iso
           retention-days: 7
 
-  boot-test:
+  boot-iso:
     runs-on: ubuntu-latest
-    needs: build
+    needs: build-iso
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download ISO
         uses: actions/download-artifact@v4
         with:
           name: iso
+          path: out
 
-      - name: Install QEMU
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 qemu-utils
+          sudo apt-get install -y qemu-system-x86 qemu-utils \
+              expect libarchive-tools
 
-      - name: Boot ISO in QEMU
+      # GitHub runners don't expose /dev/kvm, so QEMU runs under TCG.
+      # Boot reaches the login prompt much slower than locally — pad the
+      # per-step timeout accordingly.
+      - name: Boot ISO smoke test
+        env:
+          TIMEOUT: "1800"
+        run: ./test/boot.sh out/*.iso
+
+  install-iso:
+    runs-on: ubuntu-latest
+    needs: build-iso
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download ISO
+        uses: actions/download-artifact@v4
+        with:
+          name: iso
+          path: out
+
+      - name: Install dependencies
         run: |
-          ISO=$(ls *.iso)
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils \
+              expect libarchive-tools
 
-          # Extract kernel and initramfs from the ISO so we can append
-          # console=ttyS0 for serial output in headless mode.
-          mkdir iso_mount
-          sudo mount -o loop "$ISO" iso_mount
-          cp iso_mount/arch/boot/x86_64/vmlinuz-linux vmlinuz
-          cp iso_mount/arch/boot/x86_64/initramfs-linux.img initramfs
-          LABEL=$(blkid -s LABEL -o value "$ISO")
-          sudo umount iso_mount
+      - name: Install via bundled installer
+        env:
+          TIMEOUT: "3600"
+        run: ./test/install-iso.sh out/*.iso
 
-          # Create a virtual disk for the install test.
-          qemu-img create -f qcow2 test-disk.qcow2 20G
+  install-dual:
+    runs-on: ubuntu-latest
+    needs: build-iso
+    steps:
+      - uses: actions/checkout@v4
 
-          # Boot the ISO headless, logging serial output to a file.
-          touch boot.log
-          qemu-system-x86_64 \
-            -kernel vmlinuz \
-            -initrd initramfs \
-            -append "archisolabel=$LABEL console=ttyS0" \
-            -cdrom "$ISO" \
-            -m 2G \
-            -display none \
-            -serial file:boot.log \
-            -drive file=test-disk.qcow2,format=qcow2 &
-          QEMU_PID=$!
+      - name: Download ISO
+        uses: actions/download-artifact@v4
+        with:
+          name: iso
+          path: out
 
-          # Stream the serial log live for visibility during the wait.
-          tail -f boot.log &
-          TAIL_PID=$!
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils \
+              expect libarchive-tools ovmf
 
-          # Poll the file directly: agetty's "archiso login: " prompt has no
-          # trailing newline, so `grep` over `tail -f` would buffer the partial
-          # line forever. Re-running grep on the file sees EOF each pass.
-          status=1
-          for _ in $(seq 1 60); do
-            if grep -q "archiso login" boot.log; then
-              echo "Login prompt detected, boot successful."
-              status=0
-              break
-            fi
-            sleep 5
-          done
-          [ $status -ne 0 ] && echo "Timed out waiting for login prompt."
-
-          kill $TAIL_PID 2>/dev/null || true
-          kill $QEMU_PID 2>/dev/null || true
-          exit $status
-
-          # TODO: automate install.sh test against the virtual disk.
+      - name: Dual install + menu check
+        env:
+          TIMEOUT: "3600"
+        run: ./test/install-dual.sh out/*.iso

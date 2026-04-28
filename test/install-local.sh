@@ -20,9 +20,9 @@
 #
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=test-install-lib.sh
-source "$SCRIPT_DIR/test-install-lib.sh"
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# shellcheck source=test/lib.sh
+source "$SCRIPT_DIR/test/lib.sh"
 
 check_deps
 
