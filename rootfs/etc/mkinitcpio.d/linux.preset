@@ -3,7 +3,7 @@ ALL_kver="/boot/vmlinuz-linux"
 PRESETS=('default' 'fallback')
 
 default_uki="/efi/EFI/Linux/UKINAME.efi"
-default_options="--splash /usr/share/systemd/bootctl/splash-arch.bmp --os-release @/etc/uki-os-release"
+default_options="--splash /usr/share/systemd/bootctl/splash-arch.bmp"
 
 fallback_uki="/efi/EFI/Linux/UKINAME-fallback.efi"
-fallback_options="-S autodetect --os-release @/etc/uki-os-release"
+fallback_options="-S autodetect"
