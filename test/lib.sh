@@ -15,6 +15,14 @@ DISK_SIZE=${DISK_SIZE:-8G}
 TIMEOUT=${TIMEOUT:-600}
 INTERACTIVE_MODE=${INTERACTIVE:-0}
 
+# Use KVM where available (host == guest arch + /dev/kvm writable);
+# fall back to TCG emulation otherwise. CI runners typically can't KVM.
+if [ -w /dev/kvm ]; then
+    KVM_FLAGS="-enable-kvm -cpu host"
+else
+    KVM_FLAGS=""
+fi
+
 check_deps() {
     for cmd in expect bsdtar qemu-system-x86_64 qemu-img blkid; do
         command -v "$cmd" >/dev/null || { echo "ERROR: $cmd not found"; exit 1; }
@@ -80,20 +88,25 @@ cleanup_workdir() {
     fi
 }
 
-# Set up $WORK, create the test disk, and extract the live kernel +
-# initramfs from the ISO so we can append console=ttyS0 at boot.
-# Sets WORK, DISK, LOG, KERNEL, INITRD, LABEL.
-prepare_qemu_inputs() {
-    setup_workdir
-    DISK="$WORK/disk.qcow2"
-    qemu-img create -f qcow2 "$DISK" "$DISK_SIZE" >/dev/null
-
+# Extract the live kernel + initramfs from $ISO into $WORK so QEMU can
+# boot directly with console=ttyS0 appended. Sets KERNEL, INITRD, LABEL.
+# Requires WORK to be set (via setup_workdir).
+extract_iso_kernel() {
     bsdtar -xf "$ISO" -C "$WORK" \
         arch/boot/x86_64/vmlinuz-linux \
         arch/boot/x86_64/initramfs-linux.img
     KERNEL="$WORK/arch/boot/x86_64/vmlinuz-linux"
     INITRD="$WORK/arch/boot/x86_64/initramfs-linux.img"
     LABEL=$(blkid -s LABEL -o value "$ISO")
+}
+
+# Set up $WORK, create the test disk, and extract the live kernel +
+# initramfs from the ISO. Sets WORK, DISK, LOG, KERNEL, INITRD, LABEL.
+prepare_qemu_inputs() {
+    setup_workdir
+    DISK="$WORK/disk.qcow2"
+    qemu-img create -f qcow2 "$DISK" "$DISK_SIZE" >/dev/null
+    extract_iso_kernel
 }
 
 # Drive QEMU + install.sh end-to-end.
@@ -129,7 +142,7 @@ spawn qemu-system-x86_64 \\
     -append "archisobasedir=arch archisolabel=$LABEL console=ttyS0" \\
     -cdrom "$ISO" \\
     -m 4G -smp 4 \\
-    -enable-kvm -cpu host \\
+    $KVM_FLAGS \\
     -display none \\
     -serial stdio \\
     -monitor none \\
@@ -210,6 +223,58 @@ EXPECT
 )
 }
 
+# Boot the live ISO directly and verify it reaches the archiso login
+# prompt, then a working shell. Used as a smoke test that the built ISO
+# is bootable. Requires extract_iso_kernel to have populated KERNEL,
+# INITRD, LABEL, and ISO.
+drive_boot_iso() {
+    expect <(cat <<EXPECT
+set timeout $TIMEOUT
+log_file -a "$LOG"
+log_user 1
+
+proc fail {step} {
+    global expect_out
+    puts "\n=== TIMEOUT at: \$step ==="
+    puts "--- last 2KB of serial buffer ---"
+    puts \$expect_out(buffer)
+    exit 4
+}
+
+spawn qemu-system-x86_64 \\
+    -kernel "$KERNEL" \\
+    -initrd "$INITRD" \\
+    -append "archisobasedir=arch archisolabel=$LABEL console=ttyS0" \\
+    -cdrom "$ISO" \\
+    -m 4G -smp 4 \\
+    $KVM_FLAGS \\
+    -display none \\
+    -serial stdio \\
+    -monitor none \\
+    -no-reboot
+
+expect {
+    "archiso login:" { }
+    timeout { fail "archiso login prompt" }
+}
+
+if {$INTERACTIVE_MODE} {
+    puts "\n=== INTERACTIVE MODE: console is yours. ^] to detach. ==="
+    interact
+    exit 0
+}
+
+send -- "root\n"
+expect {
+    -re {[#\$] $} { }
+    timeout { fail "root shell prompt" }
+}
+send -- "sync; reboot -f\n"
+expect eof
+EXPECT
+)
+}
+
 # Boot an installed qcow2 disk under OVMF, drive the LUKS unlock prompt,
 # and verify the system reaches a login prompt and shell.
 # Args:
@@ -238,7 +303,7 @@ proc fail {step} {
 spawn qemu-system-x86_64 \\
     -bios "$OVMF_BIOS" \\
     -m 4G -smp 4 \\
-    -enable-kvm -cpu host \\
+    $KVM_FLAGS \\
     -display none \\
     -serial stdio \\
     -monitor none \\
@@ -277,20 +342,18 @@ expect {
 }
 send -- "root\n"
 
-# passwd -d removes root's password; agetty/login lets us straight in.
-# But some configurations still emit a Password: prompt (and accept empty).
+# passwd -d removes root's password; login lets us straight in. Some
+# configurations still emit "Password:" — accept empty in that case.
 expect {
     "Password:"           { send -- "\n"; exp_continue }
+    "Welcome to fish"     { }
     -re {[#\$] $}         { }
-    timeout               { fail "shell prompt after login" }
+    timeout               { fail "shell startup after login" }
 }
 
-send -- "echo __BOOT_OK__\n"
-expect {
-    "__BOOT_OK__" { }
-    timeout       { fail "boot success marker" }
-}
-
+# Fish does terminal-capability queries at startup that race with any
+# immediate send. Wait for it to settle before issuing reboot.
+sleep 3
 send -- "sync; reboot -f\n"
 expect eof
 EXPECT
@@ -316,7 +379,7 @@ log_user 1
 spawn qemu-system-x86_64 \\
     -bios "$OVMF_BIOS" \\
     -m 4G -smp 4 \\
-    -enable-kvm -cpu host \\
+    $KVM_FLAGS \\
     -display none \\
     -serial stdio \\
     -monitor none \\

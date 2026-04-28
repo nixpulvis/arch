@@ -25,14 +25,14 @@
 #
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 # Two 8G installs need a bigger disk than the single-install default.
 # Set before sourcing so the lib's `${DISK_SIZE:-8G}` default doesn't win.
 DISK_SIZE=${DISK_SIZE:-16G}
 
-# shellcheck source=test-install-lib.sh
-source "$SCRIPT_DIR/test-install-lib.sh"
+# shellcheck source=test/lib.sh
+source "$SCRIPT_DIR/test/lib.sh"
 
 # Force KEEP_DISK so test-boot.sh can pick up the result.
 KEEP_DISK=1
