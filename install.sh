@@ -218,11 +218,12 @@ CONF
         "$SCRIPT_DIR/rootfs/etc/mkinitcpio.d/linux.preset" \
         > "$MNT/etc/mkinitcpio.d/linux.preset"
 
-    # Per-install os-release for the UKI's .osrel section so this
-    # install's entry is identifiable in systemd-boot's menu rather
-    # than blending in with every other "Arch Linux" UKI on the ESP.
-    sed -e "s/^PRETTY_NAME=.*/PRETTY_NAME=\"Arch Linux (${name})\"/" \
-        "$MNT/etc/os-release" > "$MNT/etc/uki-os-release"
+    # mkinitcpio bakes /etc/os-release into the UKI's .osrel section,
+    # which systemd-boot uses for the menu title. Customizing PRETTY_NAME
+    # here gives this install a distinct entry rather than another
+    # generic "Arch Linux".
+    sed -i "s/^PRETTY_NAME=.*/PRETTY_NAME=\"Arch Linux (${name})\"/" \
+        "$MNT/etc/os-release"
 
     # mkinitcpio -U needs the UKI's parent dir to exist beforehand.
     mkdir -p "$MNT/efi/EFI/Linux"
