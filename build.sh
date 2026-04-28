@@ -191,10 +191,11 @@ EOF
 mkdir -p "$OUT"
 mkarchiso -v -w "$WORK/work" -o "$OUT" "$WORK"
 
-# Generate checksum.
-sha256sum "$OUT"/archlinux-nixpulvis-*.iso > "$OUT/sha256sum.txt"
+# SHA256 sidecar.
+ISO_FILE="$OUT/archlinux-nixpulvis-${BUILD_DATE}-x86_64.iso"
+sha256sum "$ISO_FILE" > "${ISO_FILE}.sha256"
 
 echo
 echo "ISO written to $OUT/"
-ls -lh "$OUT"/*.iso
-cat "$OUT/sha256sum.txt"
+ls -lh "$ISO_FILE"
+cat "${ISO_FILE}.sha256"
