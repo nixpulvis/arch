@@ -1,18 +1,28 @@
 # shellcheck shell=bash
-# Shared helpers for test-install-{iso,local}.sh. Source; do not execute.
+# Shared helpers for the test/ scripts. Source; do not execute.
 #
-# The wrapper scripts choose where install.sh comes from (baked into the
-# ISO vs. mounted from the host); the boot, prompt-driving, and
-# pass/fail bookkeeping is identical and lives here.
+# Provides QEMU + expect plumbing for booting the live ISO, driving an
+# in-VM install via expect prompts, booting an installed disk, and
+# capturing systemd-boot's menu output. test/install.sh's host-driven
+# default mode reuses only setup_workdir, find_ovmf, and drive_menu_check
+# from here.
 
 # These globals must be set by the caller before sourcing helpers:
-#   SCRIPT_DIR  — repo root (for finding ISOs and the project tree)
+#   SCRIPT_DIR: repo root (for finding ISOs and the project tree)
 # These get set during run:
 #   ISO, WORK, DISK, LOG, KERNEL, INITRD, LABEL
 
 PASSPHRASE=${LUKS_PASSPHRASE:-installtest}
-DISK_SIZE=${DISK_SIZE:-8G}
-TIMEOUT=${TIMEOUT:-600}
+# DISK_SIZE is set by the caller (test/install.sh picks 8G/16G based
+# on single vs dual layout); not defaulted here to avoid clobbering
+# that decision when this lib is sourced first.
+# TIMEOUT bounds expect waits on prompts that should arrive instantly
+# (login, shell, cryptsetup prompts). Kept short so wedged runs fail
+# fast. LONG_TIMEOUT bounds the steps that wait on real work: boot-up
+# from cold and pacstrap completion. Each drive_* helper toggles
+# between them around the relevant expect blocks.
+TIMEOUT=${TIMEOUT:-30}
+LONG_TIMEOUT=${LONG_TIMEOUT:-2400}
 INTERACTIVE_MODE=${INTERACTIVE:-0}
 
 # Use KVM where available (host == guest arch + /dev/kvm writable);
@@ -29,21 +39,48 @@ check_deps() {
     done
 }
 
-# Locate UEFI firmware for booting an installed disk. Sets OVMF_BIOS.
+# Locate UEFI firmware for booting an installed disk. Sets OVMF_CODE and
+# OVMF_VARS_TEMPLATE; the latter is empty for a unified image (loadable
+# via -bios) and set to the template path for split firmware (needs
+# pflash drives — use ovmf_qemu_args to assemble the right QEMU flags).
 find_ovmf() {
-    for p in \
-        /usr/share/edk2/x64/OVMF.4m.fd \
-        /usr/share/edk2-ovmf/x64/OVMF.4m.fd \
-        /usr/share/edk2-ovmf/x64/OVMF.fd \
-        /usr/share/OVMF/OVMF_CODE_4M.fd \
-        /usr/share/OVMF/OVMF_CODE.fd; do
-        if [ -f "$p" ]; then
-            OVMF_BIOS=$p
+    local candidates=(
+        "/usr/share/edk2/x64/OVMF_CODE.4m.fd|/usr/share/edk2/x64/OVMF_VARS.4m.fd"
+        "/usr/share/edk2-ovmf/x64/OVMF_CODE.4m.fd|/usr/share/edk2-ovmf/x64/OVMF_VARS.4m.fd"
+        "/usr/share/edk2/x64/OVMF.4m.fd"
+        "/usr/share/edk2-ovmf/x64/OVMF.4m.fd"
+        "/usr/share/edk2-ovmf/x64/OVMF.fd"
+        "/usr/share/OVMF/OVMF_CODE_4M.fd|/usr/share/OVMF/OVMF_VARS_4M.fd"
+        "/usr/share/OVMF/OVMF_CODE.fd|/usr/share/OVMF/OVMF_VARS.fd"
+    )
+    local entry code vars
+    for entry in "${candidates[@]}"; do
+        code=${entry%%|*}
+        vars=""
+        [ "$entry" != "$code" ] && vars=${entry#*|}
+        if [ -f "$code" ] && { [ -z "$vars" ] || [ -f "$vars" ]; }; then
+            OVMF_CODE=$code
+            OVMF_VARS_TEMPLATE=$vars
             return
         fi
     done
     echo "ERROR: OVMF firmware not found. Install edk2-ovmf (Arch) or ovmf (Debian/Ubuntu)."
     exit 1
+}
+
+# Emit the QEMU args for the located OVMF firmware. For split firmware,
+# copies the VARS template into $WORK so the guest has a writable
+# variable store (pflash requires write access even if we discard it).
+# Requires WORK when split.
+ovmf_qemu_args() {
+    if [ -z "$OVMF_VARS_TEMPLATE" ]; then
+        printf -- '-bios %s' "$OVMF_CODE"
+        return
+    fi
+    local vars="$WORK/ovmf_vars.fd"
+    cp --no-preserve=mode "$OVMF_VARS_TEMPLATE" "$vars"
+    printf -- '-drive if=pflash,format=raw,readonly=on,file=%s -drive if=pflash,format=raw,file=%s' \
+        "$OVMF_CODE" "$vars"
 }
 
 # Pick the newest ISO under $SCRIPT_DIR/out, or use $1 if it's a file.
@@ -63,7 +100,7 @@ resolve_iso() {
 
 # Set up $WORK with a cleanup trap that honors KEEP_DISK. Sets WORK, LOG.
 setup_workdir() {
-    # Put WORK in the project tree, not /tmp — qcow2 disks grow into the
+    # Put WORK in the project tree, not /tmp; qcow2 disks grow into the
     # GB range during install and /tmp is often a small tmpfs.
     WORK=$(mktemp -d --tmpdir="$SCRIPT_DIR")
     LOG="$WORK/serial.log"
@@ -110,15 +147,18 @@ prepare_qemu_inputs() {
     extract_iso_kernel
 }
 
-# Drive QEMU + install.sh end-to-end.
+# Drive QEMU through format.sh + install.sh end-to-end.
 # Args:
-#   $1 = command line to run inside the VM (must invoke install.sh and
-#        eventually return to the shell prompt; the helper appends an
-#        outcome marker so success/failure is unambiguous)
-#   $2 = (optional) additional QEMU args, passed verbatim into the spawn
+#   $1 = number of LUKS partitions format.sh creates (drives that many
+#        YES/passphrase/verify/open prompt sequences)
+#   $2 = command line to run inside the VM. Must invoke format.sh and
+#        install.sh in that order and finish with a marker (the helper
+#        wraps the call to print __INSTALL_OK__ / __INSTALL_FAIL__).
+#   $3 = (optional) additional QEMU args, passed verbatim into the spawn
 drive_install() {
-    local install_cmd=$1
-    local extra_qemu_args=${2:-}
+    local luks_count=$1
+    local install_cmd=$2
+    local extra_qemu_args=${3:-}
 
     expect <(cat <<EXPECT
 set timeout $TIMEOUT
@@ -151,60 +191,78 @@ spawn qemu-system-x86_64 \\
     -drive file=$DISK,format=qcow2,if=virtio \\
     $extra_qemu_args
 
+# Cold boot to the archiso login prompt — minutes under TCG.
+set timeout $LONG_TIMEOUT
 expect {
     "archiso login:" { }
     timeout { fail "login prompt" }
 }
+set timeout $TIMEOUT
 send -- "root\n"
 
 expect {
     -re {[#\$] $} { }
     timeout { fail "root shell prompt" }
 }
-send -- "$install_cmd && echo __INSTALL_OK__ || echo __INSTALL_FAIL__\n"
+# Wrap \$install_cmd in Tcl braces so embedded \$VAR / " survive verbatim
+# (the new flow has \$PART_1 / \$MAPPER_N referencing /tmp/parts.env in the
+# guest); concatenate the marker tail in a normal Tcl string so \\n parses
+# as a newline.
+send -- {$install_cmd}
+send -- " && echo __INSTALL_OK__ || echo __INSTALL_FAIL__\n"
 
+# format.sh prompts once before doing anything destructive.
 expect {
     "Are you sure?" { }
-    timeout { fail "install.sh confirm prompt" }
+    timeout { fail "format.sh confirm prompt" }
 }
 send -- "y\n"
 
-expect {
-    -re \$yes_prompt { }
-    timeout { fail "cryptsetup YES prompt" }
-}
-send -- "YES\n"
+# Each LUKS partition: cryptsetup YES warning, luksFormat passphrase
+# (with verify), then luksOpen passphrase. 1s sleeps avoid racing
+# cryptsetup's tcsetattr; sending immediately after the regex match
+# loses chars to canonical+echo mode.
+for {set i 0} {\$i < $luks_count} {incr i} {
+    expect {
+        -re \$yes_prompt { }
+        timeout { fail "cryptsetup YES prompt (luks #\$i)" }
+    }
+    send -- "YES\n"
 
-expect {
-    -re \$enter_prompt { }
-    timeout { fail "cryptsetup luksFormat passphrase prompt" }
-}
-# 1s sleep avoids racing cryptsetup's tcsetattr (same fix as drive_boot).
-sleep 1
-send -- "$PASSPHRASE\n"
-puts "\n>>> sent luksFormat passphrase, waiting for verify (Argon2id KDF takes a moment)..."
+    expect {
+        -re \$enter_prompt { }
+        timeout { fail "cryptsetup luksFormat passphrase (luks #\$i)" }
+    }
+    sleep 1
+    send -- "$PASSPHRASE\n"
+    puts "\n>>> sent luksFormat passphrase #\$i, waiting for verify..."
 
-expect {
-    -re \$verify_prompt { }
-    timeout { fail "cryptsetup verify-passphrase prompt" }
-}
-sleep 1
-send -- "$PASSPHRASE\n"
-puts "\n>>> sent verify, waiting for luksFormat to finish and luksOpen prompt..."
+    expect {
+        -re \$verify_prompt { }
+        timeout { fail "cryptsetup verify-passphrase (luks #\$i)" }
+    }
+    sleep 1
+    send -- "$PASSPHRASE\n"
 
-expect {
-    -re \$enter_prompt { }
-    timeout { fail "cryptsetup luksOpen passphrase prompt" }
+    expect {
+        -re \$enter_prompt { }
+        timeout { fail "cryptsetup luksOpen passphrase (luks #\$i)" }
+    }
+    sleep 1
+    send -- "$PASSPHRASE\n"
+    puts "\n>>> sent luksOpen passphrase #\$i"
 }
-sleep 1
-send -- "$PASSPHRASE\n"
-puts "\n>>> sent luksOpen passphrase, waiting for install to finish (pacstrap may take a few minutes)..."
 
+puts "\n>>> LUKS setup done, waiting for install(s) to finish (pacstrap may take a few minutes per install)..."
+
+# pacstrap + bootctl + sync — minutes per install.
+set timeout $LONG_TIMEOUT
 expect {
     "__INSTALL_OK__"   { }
-    "__INSTALL_FAIL__" { puts "\n=== install.sh exited non-zero ==="; exit 2 }
+    "__INSTALL_FAIL__" { puts "\n=== install pipeline exited non-zero ==="; exit 2 }
     timeout            { fail "install completion marker" }
 }
+set timeout $TIMEOUT
 
 if {$INTERACTIVE_MODE} {
     puts "\n=== INTERACTIVE MODE: ^] to detach the QEMU monitor ==="
@@ -214,9 +272,8 @@ if {$INTERACTIVE_MODE} {
         -re {[#\$] $} { }
         timeout { fail "post-install shell prompt" }
     }
-    # reboot -f skips systemd shutdown (which can hang on the 9p
-    # unmount in local mode) and calls reboot(2) directly; QEMU's
-    # -no-reboot turns the guest reboot into process exit.
+    # reboot -f skips systemd shutdown and calls reboot(2) directly;
+    # QEMU's -no-reboot turns the guest reboot into process exit.
     send -- "sync; reboot -f\n"
     expect eof
 }
@@ -229,8 +286,9 @@ EXPECT
 # is bootable. Requires extract_iso_kernel to have populated KERNEL,
 # INITRD, LABEL, and ISO.
 drive_boot_iso() {
+    # The whole helper waits on a cold boot; LONG_TIMEOUT throughout.
     expect <(cat <<EXPECT
-set timeout $TIMEOUT
+set timeout $LONG_TIMEOUT
 log_file -a "$LOG"
 log_user 1
 
@@ -282,9 +340,14 @@ EXPECT
 #   $1 = path to the installed qcow2 disk (read-write; will be modified)
 drive_boot() {
     local disk=$1
+    local ovmf_args
+    ovmf_args=$(ovmf_qemu_args)
 
+    # Boot from cold (OVMF + initramfs + LUKS unlock + systemd) — slow
+    # under TCG; use LONG_TIMEOUT throughout. Post-login waits would
+    # normally be fast but the cost of a slow failure here is small.
     expect <(cat <<EXPECT
-set timeout $TIMEOUT
+set timeout $LONG_TIMEOUT
 log_file -a "$LOG"
 log_user 1
 
@@ -299,10 +362,10 @@ proc fail {step} {
 }
 
 # SMBIOS Type 11 string is read by systemd-stub at boot and appended to
-# the kernel cmdline — lets us route output to serial without modifying
+# the kernel cmdline. Lets us route output to serial without modifying
 # the production UKI's baked cmdline.
 spawn qemu-system-x86_64 \\
-    -bios "$OVMF_BIOS" \\
+    $ovmf_args \\
     -m 4G -smp 4 \\
     $KVM_FLAGS \\
     -display none \\
@@ -318,7 +381,7 @@ expect {
 }
 
 # In INTERACTIVE mode, hand off BEFORE sending the passphrase so the
-# user can type it manually and observe what happens — useful when the
+# user can type it manually and observe what happens. Useful when the
 # auto-send appears to hang (lets us isolate whether cryptsetup itself
 # is the problem or our send timing is).
 if {$INTERACTIVE_MODE} {
@@ -331,7 +394,7 @@ if {$INTERACTIVE_MODE} {
 
 # Wait for cryptsetup to finish printing the prompt and call tcsetattr
 # to disable echo. Sending immediately after the regex match races that
-# setup — the chars hit the TTY in canonical+echo mode and cryptsetup
+# setup; the chars hit the TTY in canonical+echo mode and cryptsetup
 # never sees them as a complete passphrase.
 sleep 1
 send -- "$PASSPHRASE\n"
@@ -344,7 +407,7 @@ expect {
 send -- "root\n"
 
 # passwd -d removes root's password; login lets us straight in. Some
-# configurations still emit "Password:" — accept empty in that case.
+# configurations still emit "Password:"; accept empty in that case.
 expect {
     "Password:"           { send -- "\n"; exp_continue }
     "Welcome to fish"     { }
@@ -372,13 +435,15 @@ drive_menu_check() {
     shift
     local expected=("$@")
     local capture="$WORK/menu.log"
+    local ovmf_args
+    ovmf_args=$(ovmf_qemu_args)
 
     expect <(cat <<EXPECT
 log_file -a "$capture"
 log_user 1
 
 spawn qemu-system-x86_64 \\
-    -bios "$OVMF_BIOS" \\
+    $ovmf_args \\
     -m 4G -smp 4 \\
     $KVM_FLAGS \\
     -display none \\
@@ -388,10 +453,10 @@ spawn qemu-system-x86_64 \\
     -smbios type=11,value=io.systemd.stub.kernel-cmdline-extra=console=ttyS0,,115200 \\
     -drive file=$disk,format=qcow2,if=virtio
 
-# Capture ~15 seconds of output. The OVMF→systemd-boot handoff takes a
-# few seconds; the menu renders, then auto-boot fires after 5s. By 15s
+# Capture ~15 seconds of output. The OVMF to systemd-boot handoff takes
+# a few seconds; the menu renders, then auto-boot fires after 5s. By 15s
 # we've seen the menu and possibly the start of one entry's boot, which
-# is fine — we only care about what was in the menu text.
+# is fine; we only care about what was in the menu text.
 set timeout 15
 expect timeout { }
 

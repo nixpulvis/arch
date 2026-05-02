@@ -17,46 +17,57 @@ tar -xzvf arch-master.tar.gz
 
 ## Install
 
-Running the installer script will repurpose the target device to be a working
-Arch Linux installation.
+Installation is two scripts: `format.sh` does the disk surgery
+(partitions, LUKS, filesystems), `install.sh` does the OS install.
+Splitting them keeps the destructive step explicit and lets one
+`format.sh` set up an ESP plus N root slots for as many installs as you
+want.
 
 TODO: Read only installs.
 TODO: Allow pacman mirror from disk (for offline installs).
 
 ```sh
-./install.sh <device>
+# Format /dev/sda as ESP + LUKS-ext4 root, leave the LUKS volume open (-k).
+eval "$(./format.sh -k -p boot -p luks-ext4 /dev/sda)"
 
-# Example:
-./install.sh /dev/sda
+# Install onto the opened root, using the ESP we just created.
+./install.sh -b "$PART_1" "$MAPPER_2"
 ```
 
-The installer formats `<device>` as GPT with a 512 MB ESP and a LUKS-encrypted
-root, then drops a Unified Kernel Image at `/efi/EFI/Linux/arch.efi` and
-installs systemd-boot. Microcode is selected from `/proc/cpuinfo` so only the
-matching `intel-ucode` or `amd-ucode` package lands on disk.
+`format.sh` accepts repeated `-p <spec>` flags. Specs:
+
+- `boot[:<size>]`: ESP (fat32, 512 MiB default)
+- `<fstype>[:<size>]`: plain ext4/exfat/...
+- `luks-<fstype>[:<size>]`: LUKS-wrapped fs
+
+Omit the size on the last `-p` to use remaining space. `-k` keeps LUKS
+volumes open after formatting (so `install.sh` can use them); without
+`-k` they're closed and you re-open them yourself.
+
+`install.sh` drops a Unified Kernel Image at `/efi/EFI/Linux/arch.efi`
+and installs systemd-boot. Microcode is selected from `/proc/cpuinfo`
+so only the matching `intel-ucode` or `amd-ucode` package lands on
+disk.
 
 ### Dual-boot
 
-Use `-b <esp>` to reuse an existing EFI System Partition (e.g. one already
-shared with Windows or another Arch install). In this mode `<device>` is
-treated as the **root partition**, not a whole disk: the installer makes no
-changes to the GPT and the existing loader configuration on the ESP is
-preserved.
+`-b <esp>` lets `install.sh` reuse an existing EFI System Partition (e.g.
+one already shared with Windows or another Arch install). The installer
+makes no changes to the GPT and the existing loader configuration on
+the ESP is preserved.
 
-Use `-n <name>` to pick the UKI filename (default `arch`). Two Arch installs
+`-n <name>` picks the UKI filename (default `arch`). Two Arch installs
 sharing one ESP need distinct names so their UKIs don't collide in
 `$ESP/EFI/Linux/`. The same name also feeds the UKI's embedded
 `PRETTY_NAME` so each install shows up as `Arch Linux (<name>)` in the
 systemd-boot menu instead of blending into a sea of identical entries.
 
 ```sh
-# Install alongside Windows on /dev/sda. /dev/sda1 is the existing ESP,
-# /dev/sda3 is a pre-created LUKS-bound partition for our root.
-./install.sh -b /dev/sda1 /dev/sda3
-
-# Two Arch installs sharing one ESP:
-./install.sh -b /dev/sda1 -n arch-work /dev/sda2
-./install.sh -b /dev/sda1 -n arch-home /dev/sda3
+# Two Arch installs sharing one ESP. format.sh creates the ESP plus two
+# 8 GiB LUKS roots in one shot:
+eval "$(./format.sh -k -p boot -p luks-ext4:8GiB -p luks-ext4 /dev/sda)"
+./install.sh -b "$PART_1" -n arch-work "$MAPPER_2"
+./install.sh -b "$PART_1" -n arch-home "$MAPPER_3"
 ```
 
 If the existing ESP already has systemd-boot, the installer runs

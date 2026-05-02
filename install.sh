@@ -1,43 +1,43 @@
 #!/bin/bash
+#
+# Install Arch Linux onto a pre-formatted root with an existing ESP.
+#
+# Pacstraps a base system into the opened LUKS root, generates a
+# Unified Kernel Image at $ESP/EFI/Linux/<name>.efi, and installs (or
+# updates) systemd-boot on the ESP. Microcode is selected from
+# /proc/cpuinfo so only the matching intel-ucode or amd-ucode package
+# lands on disk.
+#
+# Run format.sh first to partition the disk, format the ESP, and open
+# the LUKS root. Two install.sh runs against the same -b ESP with
+# distinct -n names produce a dual-boot setup.
+#
+# Requires: arch-install-scripts (pacstrap, genfstab, arch-chroot),
+# cryptsetup, util-linux. Run as root.
+#
+# See also: format.sh
+#
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 usage() {
-    echo "Usage: install.sh [-e <source>] [-b <esp>] [-n <name>] <device>"
+    echo "Usage: install.sh -b <esp> [-n <name>] <root-mapper>"
     echo
-    echo "Install Arch Linux to a target device with LUKS encryption."
+    echo "Install Arch Linux onto a pre-formatted root with an existing ESP."
     echo
-    echo "  -e <source>  Erase the device first (e.g. -e /dev/urandom)"
-    echo "  -b <esp>     Reuse an existing ESP partition (dual-boot). <device>"
-    echo "               is treated as the root partition; no GPT changes are"
-    echo "               made and the existing loader config is preserved."
+    echo "  -b <esp>     ESP partition (e.g. /dev/vda1). Mounted at /efi."
     echo "  -n <name>    Name for this install (default: arch). Used as"
     echo "               \$ESP/EFI/Linux/<name>.efi for the UKI, and as"
     echo "               'Arch Linux (<name>)' for the systemd-boot menu entry."
-    echo "  -h           Show this help"
-    exit "$1"
+    echo "  -h           Show this help."
+    echo
+    echo "<root-mapper> is the opened LUKS mapper (e.g. /dev/mapper/cryptroot-2)."
+    echo "Run format.sh first to partition the disk and open the LUKS root."
+    exit "${1:-0}"
 }
 
-error() {
-    echo "ERROR: $1"
-    exit 1
-}
-
-ending_digit() {
-    case $1 in
-        *[0-9]) true ;;
-        *) false ;;
-    esac
-}
-
-partition_name() {
-    if ending_digit "$1"; then
-        echo "$1p$2"
-    else
-        echo "$1$2"
-    fi
-}
+error() { echo "ERROR: $1"; exit 1; }
 
 # Pick the microcode package matching the host CPU. Empty for VMs/exotic.
 ucode_package() {
@@ -48,114 +48,31 @@ ucode_package() {
 }
 
 name="arch"
+boot=
 
-# Parse the command line arguments.
-while getopts 'e:b:n:h' arg; do case "${arg}" in
-        e) erase="${OPTARG}" ;;
-        b) dual_boot_esp="${OPTARG}" ;;
-        n) name="${OPTARG}" ;;
-        h) usage 0 ;;
-        *)
-           echo "Invalid argument '${arg}'"
-           usage 1
-           ;;
-    esac
-done
-shift $((OPTIND -1))
-target=$1
+while getopts 'b:n:h' arg; do case "${arg}" in
+    b) boot="${OPTARG}" ;;
+    n) name="${OPTARG}" ;;
+    h) usage 0 ;;
+    *) usage 1 ;;
+esac done
+shift $((OPTIND - 1))
+root=$1
 
-if [ -n "$dual_boot_esp" ]; then
-    # Dual-boot mode: caller supplies a pre-partitioned root device and
-    # an existing ESP. We don't touch the GPT.
-    boot=$dual_boot_esp
-    root=$target
-else
-    boot=$(partition_name "$target" 1)
-    root=$(partition_name "$target" 2)
-fi
+[[ $EUID -ne 0 ]] && error "run this script as root."
+[ -z "$boot" ] && usage 1
+[ -z "$root" ] && usage 1
+[ -b "$root" ] || error "$root is not a block device."
+[ -b "$boot" ] || error "$boot is not a block device."
 
-confirm() {
-    read -rp "Are you sure? [Y/n] " answer
-    case "$answer" in
-        [yY][eE][sS]|[yY])
-	    ;;
-	*)
-	    echo "quitting."
-	    exit 0
-	    ;;
-    esac
-}
+# blkid on the mapper returns the inner ext4 UUID; we need the LUKS
+# header UUID, which lives on the underlying partition.
+root_part=$(cryptsetup status "$root" | awk '/^[[:space:]]*device:/ {print $2}')
+[ -z "$root_part" ] && error "$root is not an open LUKS mapping."
 
-# Format, partitions and creates the file systems for a new installation.
-# This function can optionally wipe the old data by simply writing over it
-# all.
-bootstrap() {
-    if [ -n "$dual_boot_esp" ]; then
-        echo "Bootstrapping $target as the root partition; reusing ESP $boot."
-    else
-        echo "Bootstrapping $target, this will format the device."
-    fi
-    if [ -n "$erase" ]; then
-        echo "Erasing $target with $erase, this can take a while."
-    fi
-
-    lsblk "$target"
-    confirm
-    echo
-
-    # From this point on we don't ask the user for anything.
-
-    # Remove all mounts of the target device.
-    if umount "$target"?* 2>&1 | grep -q 'target is busy'; then
-        error "could not unmount $target"
-    fi
-
-    # TODO: Mount a plain crypt and wipe with that.
-    # When the drive's firmware is trusted, prefer hardware secure-erase
-    # over a software wipe: `blkdiscard $target` for SATA SSDs (TRIM),
-    # `nvme format --ses=1 $target` for NVMe, or `hdparm --security-erase`
-    # for ATA drives that support it.
-    if [ -n "$erase" ]; then
-        dd if="$erase" of="$target" status=progress
-    fi
-
-    # Clear old partition signatures so fdisk starts clean.
-    wipefs -a "$target"
-
-    if [ -z "$dual_boot_esp" ]; then
-        # Format the target with a GPT, 512MB EFI partition #1 and the rest
-        # for the root filesystem.
-        fdisk "$target" << EOF
-g
-n
-
-
-+512M
-t
-1
-n
-
-
-
-p
-w
-EOF
-        # Force the kernel to re-read the partition table and wait for udev
-        # to create the new partition device nodes before we format them.
-        partprobe "$target"
-        udevadm settle
-        mkfs.vfat -F32 "$boot"
-    fi
-
-    cryptsetup luksFormat "$root"
-    cryptsetup luksOpen "$root" cryptroot
-    mkfs.ext4 /dev/mapper/cryptroot
-}
-
-# Installs an updated Arch to the formatted target
 install() {
     MNT=$(mktemp -d)
-    mount /dev/mapper/cryptroot "$MNT"
+    mount "$root" "$MNT"
     mkdir -p "$MNT/efi"
     mount "$boot" "$MNT/efi"
 
@@ -163,8 +80,6 @@ install() {
     # hook (which runs mkinitcpio with the keymap hook) doesn't error.
     mkdir -p "$MNT/etc"
     cp "$SCRIPT_DIR/rootfs/etc/vconsole.conf" "$MNT/etc/vconsole.conf"
-
-    # TODO: Check host locale settings.
 
     # Build the package list with the matching microcode appended.
     ucode=$(ucode_package)
@@ -205,12 +120,9 @@ CONF
 
     # Stage initramfs / UKI inputs before mkinitcpio runs.
     cp "$SCRIPT_DIR/rootfs/etc/mkinitcpio.conf" "$MNT/etc/mkinitcpio.conf"
-    # LUKS header UUID rather than partition PARTUUID: works for both
-    # partition-LUKS and whole-disk-LUKS targets; cryptsetup stamps it
-    # at format time so it's always available now.
-    luks_uuid=$(blkid -s UUID -o value "$root")
+    luks_uuid=$(cryptsetup luksUUID "$root_part")
     if [ -z "$luks_uuid" ]; then
-        error "blkid found no UUID on $root after LUKS format. Aborting before generating a UKI with a broken kernel cmdline."
+        error "no LUKS UUID for $root_part. Aborting before generating a UKI with a broken kernel cmdline."
     fi
     sed -e "s/XXXX/${luks_uuid}/" \
         "$SCRIPT_DIR/rootfs/etc/kernel/cmdline" > "$MNT/etc/kernel/cmdline"
@@ -245,7 +157,7 @@ chsh -s /usr/bin/fish
 passwd -d root
 EOF
 
-    # Write loader.conf whenever we freshly installed systemd-boot —
+    # Write loader.conf whenever we freshly installed systemd-boot.
     # bootctl install's default has no `timeout`, which means auto-boot
     # the first entry with no menu. That breaks discoverability for
     # both single-OS installs (no recovery path) and dual-boot. If
@@ -273,16 +185,4 @@ EOF
     rmdir "$MNT"
 }
 
-
-# Check for root user.
-if [[ $EUID -ne 0 ]]; then
-    error "run this script as root."
-fi
-
-# Check the arguments.
-if [ -z "$target" ]; then
-    usage 1
-fi
-
-bootstrap
 install

@@ -2,9 +2,9 @@
 #
 # Boot test. Mode is dispatched by file extension of the argument:
 #
-#   *.iso  → boot the live ISO directly (smoke test that the built ISO
+#   *.iso  -> boot the live ISO directly (smoke test that the built ISO
 #            is bootable; no install, no LUKS).
-#   else   → boot an installed qcow2 disk under OVMF, drive the LUKS
+#   else   -> boot an installed qcow2 disk under OVMF, drive the LUKS
 #            unlock prompt, and verify a working shell.
 #
 # Examples:
@@ -53,7 +53,7 @@ case "$TARGET" in
         find_ovmf
         setup_workdir
         echo "Disk:     $TARGET"
-        echo "OVMF:     $OVMF_BIOS"
+        echo "OVMF:     $OVMF_CODE${OVMF_VARS_TEMPLATE:+ + $OVMF_VARS_TEMPLATE}"
         echo "Log:      $LOG"
         echo
         drive_boot "$TARGET"
