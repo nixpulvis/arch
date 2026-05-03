@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: shellcheck
-        run: shellcheck build.sh install.sh test/*.sh
+        run: shellcheck build.sh format.sh install.sh test/*.sh
 
   build-iso:
     runs-on: ubuntu-latest
@@ -25,7 +25,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pacman -Sy --noconfirm archiso sudo git base-devel
+          pacman -Sy --noconfirm archiso sudo git base-devel curl
           echo 'builduser ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builduser
 
       - name: Build ISO
@@ -61,40 +61,18 @@ jobs:
           sudo apt-get install -y qemu-system-x86 qemu-utils \
               expect libarchive-tools
 
-      # GitHub runners don't expose /dev/kvm, so QEMU runs under TCG.
-      # Boot reaches the login prompt much slower than locally — pad the
-      # per-step timeout accordingly.
       - name: Boot ISO smoke test
         env:
-          TIMEOUT: "1800"
+          LONG_TIMEOUT: "1800"
         run: ./test/boot.sh out/*.iso
 
   install-iso:
     runs-on: ubuntu-latest
     needs: build-iso
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Download ISO
-        uses: actions/download-artifact@v8
-        with:
-          name: iso
-          path: out
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 qemu-utils \
-              expect libarchive-tools
-
-      - name: Install via bundled installer
-        env:
-          TIMEOUT: "3600"
-        run: ./test/install-iso.sh out/*.iso
-
-  install-dual:
-    runs-on: ubuntu-latest
-    needs: build-iso
+    strategy:
+      fail-fast: false
+      matrix:
+        layout: [single, dual]
     steps:
       - uses: actions/checkout@v6
 
@@ -110,7 +88,11 @@ jobs:
           sudo apt-get install -y qemu-system-x86 qemu-utils \
               expect libarchive-tools ovmf
 
-      - name: Dual install + menu check
+      - name: Install via bundled installer + menu check (${{ matrix.layout }})
         env:
-          TIMEOUT: "3600"
-        run: ./test/install-dual.sh out/*.iso
+          LONG_TIMEOUT: "3600"
+        run: |
+          flags=""
+          [ "${{ matrix.layout }}" = "dual" ] && flags="-d"
+          # shellcheck disable=SC2086
+          ./test/install.sh -i $flags out/*.iso

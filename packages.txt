@@ -15,9 +15,11 @@ ddrescue
 dhcpcd
 dialog
 dosfstools
+e2fsprogs
 efibootmgr
 ethtool
 exfatprogs
+gptfdisk
 fish
 git
 gvim

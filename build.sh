@@ -2,53 +2,50 @@
 #
 # Build a bootable Arch Linux ISO with the installer baked in.
 #
-# Requires: archiso
+# Starts from the stock archiso releng profile and applies our changes
+# at build time: merges packages.txt into the live package list, builds
+# the AUR packages we use (downgrade, paru-bin) as a local repo, caches
+# packages.txt into an offline repo for offline installs, copies
+# format.sh / install.sh / rootfs/ into /root on the live image, sets
+# the default shell to fish, and writes a versioned MOTD. The output
+# ISO and matching SHA256 checksum land in out/.
 #
-# The ISO is built from the stock releng profile with the following
-# modifications applied at build time:
+# Requires: archiso. Run as root.
 #
-#   - packages.x86_64 is merged with our packages.txt
-#   - AUR packages (downgrade, paru-bin) are built and added as a local repo
-#   - packages.txt packages are cached into a offline repo for offline installs
-#   - install.sh, packages.txt, and rootfs/ are copied into /root
-#   - profiledef.sh is patched with our ISO metadata
-#   - The default shell is set to fish
-#   - MOTD is set with version and build date
-#   - SHA256 checksum is generated for the output ISO
+# See also: format.sh, install.sh
 #
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 RELENG="/usr/share/archiso/configs/releng"
 
+usage() {
+    echo "Usage: build.sh [-s] [-o <path>]"
+    echo
+    echo "Build a bootable Arch Linux ISO with the installer baked in."
+    echo
+    echo "  -s           Enable sshd on the live image."
+    echo "  -o <path>    Path to existing offline repo"
+    echo "               (default: \$SCRIPT_DIR/offline-repo)."
+    echo "  -h           Show this help."
+    exit "${1:-0}"
+}
+
+error() { echo "ERROR: $1"; exit 1; }
+
 if [ ! -d "$RELENG" ]; then
-    echo "ERROR: archiso releng profile not found at $RELENG"
-    echo "Install archiso: pacman -S archiso"
-    exit 1
+    error "archiso releng profile not found at $RELENG (install: pacman -S archiso)"
 fi
 
-# Parse options.
 while getopts 'so:h' arg; do case "${arg}" in
-        s) enable_sshd=true ;;
-        o) offline_repo_path="${OPTARG}" ;;
-        h) echo "Usage: build.sh [-s] [-o <path>]"
-           echo
-           echo "Build a bootable Arch Linux ISO with the installer baked in."
-           echo
-           echo "  -s         Enable sshd on the live image"
-           echo "  -o <path>  Path to existing offline repo (default: \$SCRIPT_DIR/offline-repo)"
-           echo "  -h         Show this help"
-           exit 0 ;;
-        *) exit 1 ;;
-    esac
-done
+    s) enable_sshd=true ;;
+    o) offline_repo_path="${OPTARG}" ;;
+    h) usage 0 ;;
+    *) usage 1 ;;
+esac done
 offline_repo_path="${offline_repo_path:-$SCRIPT_DIR/offline-repo}"
 
-# Check for root.
-if [[ $EUID -ne 0 ]]; then
-    echo "ERROR: run this script as root."
-    exit 1
-fi
+[[ $EUID -ne 0 ]] && error "run this script as root."
 
 # Setup a temp dir for the build profile. Cleaned up on exit.
 WORK=$(mktemp -d --tmpdir="$SCRIPT_DIR")
@@ -142,6 +139,7 @@ Server = file://$AUR_REPO
 EOF
 
 # Copy the installer and build script into /root on the live filesystem.
+cp "$SCRIPT_DIR/format.sh" "$WORK/airootfs/root/"
 cp "$SCRIPT_DIR/install.sh" "$WORK/airootfs/root/"
 cp "$SCRIPT_DIR/build.sh" "$WORK/airootfs/root/"
 cp "$SCRIPT_DIR/packages.txt" "$WORK/airootfs/root/"
@@ -156,7 +154,7 @@ sed -i 's/^iso_application=.*/iso_application="Arch Linux Live\/Install"/' "$WOR
 sed -i "s/airootfs_image_tool_options=.*/airootfs_image_tool_options=('-comp' 'zstd' '-Xcompression-level' '15')/" "$WORK/profiledef.sh"
 
 # Register our scripts in archiso's file_permissions table.
-sed -i 's|^file_permissions=(|file_permissions=(\n  ["/root/install.sh"]="0:0:755"\n  ["/root/build.sh"]="0:0:755"|' "$WORK/profiledef.sh"
+sed -i 's|^file_permissions=(|file_permissions=(\n  ["/root/format.sh"]="0:0:755"\n  ["/root/install.sh"]="0:0:755"\n  ["/root/build.sh"]="0:0:755"|' "$WORK/profiledef.sh"
 
 # Set the default shell to bash on the live image (releng defaults to zsh).
 sed -i 's|root:/usr/bin/zsh|root:/bin/bash|' "$WORK/airootfs/etc/passwd"
@@ -179,7 +177,8 @@ cat > "$WORK/airootfs/etc/motd" << EOF
   $BUILD_DATE
 
   Install to a device:
-    ./install.sh /dev/sdX
+    eval "\$(./format.sh -k -p boot -p luks-ext4 /dev/sdX)"
+    ./install.sh -b "\$PART_1" "\$MAPPER_2"
 
   Build a new ISO:
     ./build.sh
